@@ -324,11 +324,6 @@ type spawnResultMsg struct {
 // spawnAgentCmd runs the spawn logic asynchronously as a Bubble Tea Cmd
 func (m Model) spawnAgentCmd() tea.Cmd {
 	return func() tea.Msg {
-		// First kill the existing active agent pane if one exists
-		if m.ActivePaneID != "" {
-			_ = tmux.KillPane(m.ActivePaneID)
-		}
-
 		selectedAgent := m.Agents[m.SelectedAgent]
 		selectedDir := m.CurrentDirPath
 		selectedTarget := tmux.SpawnTarget(m.SelectedTarget)
