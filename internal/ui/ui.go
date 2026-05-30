@@ -1015,6 +1015,9 @@ func truncateStr(s string, maxLen int) string {
 // formatDirPath replaces absolute user home folders with ~ for premium clean look
 func formatDirPath(path string) string {
 	res := filepath.Clean(path)
+	if idx := strings.Index(res, "/projects/"); idx != -1 {
+		return res[idx:]
+	}
 	res = strings.Replace(res, "/home/noxturne/.antigravity-personal", "~", 1)
 	res = strings.Replace(res, "/home/noxturne", "~", 1)
 	return res
@@ -1171,12 +1174,14 @@ func (m Model) View() string {
 					displayPath := formatDirPath(item.Path)
 					if i == m.SelectedTreeItem {
 						folderStyle := lipgloss.NewStyle().Foreground(colorPurple).Bold(true)
-						renderLine = fmt.Sprintf("❯ %s%s", collapsedSymbol, folderStyle.Render(displayPath))
+						symbolStyle := lipgloss.NewStyle().Foreground(colorPink).Bold(true)
+						renderLine = fmt.Sprintf("❯ %s%s", symbolStyle.Render(collapsedSymbol), folderStyle.Render(displayPath))
 					} else {
 						folderMutedStyle := lipgloss.NewStyle().Foreground(colorGray).Bold(true)
-						renderLine = fmt.Sprintf("  %s%s", collapsedSymbol, folderMutedStyle.Render(displayPath))
+						symbolStyle := lipgloss.NewStyle().Foreground(colorAmber).Bold(true)
+						renderLine = fmt.Sprintf("  %s%s", symbolStyle.Render(collapsedSymbol), folderMutedStyle.Render(displayPath))
 					}
-					leftLines = append(leftLines, truncateStr(renderLine, leftInnerWidth))
+					leftLines = append(leftLines, truncateStr(renderLine, leftInnerWidth+50))
 				} else {
 					pane := item.Pane
 					agentIcon := getAgentIcon(pane.Command)
@@ -1188,7 +1193,7 @@ func (m Model) View() string {
 						paneText := fmt.Sprintf("[%s] %s  %s (W: %s)", pane.PaneID, agentIcon, pane.Command, pane.WindowID)
 						renderLine = fmt.Sprintf("  └──   %s", paneText)
 					}
-					leftLines = append(leftLines, truncateStr(renderLine, leftInnerWidth+10)) // account for ansi escape color bytes
+					leftLines = append(leftLines, truncateStr(renderLine, leftInnerWidth+50)) // account for ansi escape color bytes
 				}
 			}
 		}
