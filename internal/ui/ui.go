@@ -5,15 +5,24 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/noxturne/tmux-ai-orchestrator/internal/prompt"
 	"github.com/noxturne/tmux-ai-orchestrator/internal/tmux"
 )
+
+var cursorMovementRegex = regexp.MustCompile(`\x1b\[[0-9;?]*[A-LN-Za-ln-z]`)
+
+func cleanAnsiAndTabs(s string) string {
+	s = strings.ReplaceAll(s, "\t", "    ")
+	return cursorMovementRegex.ReplaceAllString(s, "")
+}
 
 // Tab swaps between viewports
 type Tab int
@@ -66,9 +75,9 @@ type fzfFinishedMsg struct {
 	err        error
 }
 
-// tickTelemetry schedules the next telemetry query tick in 1 second
+// tickTelemetry schedules the next telemetry query tick in 100 milliseconds
 func tickTelemetry() tea.Cmd {
-	return tea.Tick(time.Second, func(t time.Time) tea.Msg {
+	return tea.Tick(100*time.Millisecond, func(t time.Time) tea.Msg {
 		return telemetryTickMsg(t)
 	})
 }
@@ -169,6 +178,10 @@ type Model struct {
 	// Dynamic terminal layout states
 	Width  int
 	Height int
+
+	// Event-driven PTY pipe-pane and viewport states
+	Viewport            viewport.Model
+	ViewportInitialized bool
 }
 
 // InitialModel initializes the state variables
@@ -213,6 +226,8 @@ func InitialModel() Model {
 		TelemetryBuffer:        "[Select an active agent to view telemetry]",
 		Width:                  80, // Default initialization fallback
 		Height:                 24, // Default initialization fallback
+		Viewport:               viewport.New(0, 0),
+		ViewportInitialized:    false,
 	}
 	m.populateDirList()
 	m.refreshFleet()
@@ -430,7 +445,7 @@ func (m Model) getPreviewCommand() string {
 }
 
 // queryTelemetryCmd fires capture-pane query on highlighted pane
-func (m Model) queryTelemetryCmd() tea.Cmd {
+func (m *Model) queryTelemetryCmd() tea.Cmd {
 	if len(m.TreeItems) == 0 {
 		return nil
 	}
@@ -440,7 +455,7 @@ func (m Model) queryTelemetryCmd() tea.Cmd {
 	}
 	paneID := item.Pane.PaneID
 	return func() tea.Msg {
-		buf, err := tmux.CapturePaneBuffer(paneID)
+		buf, err := tmux.CapturePaneRaw(paneID)
 		return telemetryResultMsg{
 			paneID: paneID,
 			buffer: buf,
@@ -449,17 +464,62 @@ func (m Model) queryTelemetryCmd() tea.Cmd {
 	}
 }
 
+func (m *Model) recalcViewportSize() {
+	leftWidth := int(float64(m.Width) * 0.4)
+	if leftWidth < 22 {
+		leftWidth = 22
+	}
+	rightWidth := m.Width - leftWidth
+	if rightWidth < 22 {
+		rightWidth = 22
+	}
+
+	gridHeight := m.Height - 3
+	if gridHeight < 6 {
+		gridHeight = 6
+	}
+	rightTopHeight := int(float64(gridHeight) * 0.7)
+
+	rightTopInnerWidth := rightWidth - 4
+	rightTopInnerHeight := rightTopHeight - 2
+	viewportHeight := rightTopInnerHeight - 1
+	if viewportHeight < 1 {
+		viewportHeight = 1
+	}
+
+	if !m.ViewportInitialized {
+		m.Viewport = viewport.New(rightTopInnerWidth, viewportHeight)
+		m.ViewportInitialized = true
+	} else {
+		m.Viewport.Width = rightTopInnerWidth
+		m.Viewport.Height = viewportHeight
+	}
+}
+
+func (m *Model) getActivePaneID() string {
+	if len(m.TreeItems) == 0 || m.SelectedTreeItem >= len(m.TreeItems) {
+		return ""
+	}
+	item := m.TreeItems[m.SelectedTreeItem]
+	if item.IsFolder {
+		return ""
+	}
+	return item.Pane.PaneID
+}
+
 // Init initializes the Bubble Tea model
-func (m Model) Init() tea.Cmd {
-	return tickTelemetry()
+func (m *Model) Init() tea.Cmd {
+	m.recalcViewportSize()
+	return tea.Batch(m.queryTelemetryCmd(), tickTelemetry())
 }
 
 // Update handles state changes on key presses and asynchronous message callbacks
-func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.Width = msg.Width
 		m.Height = msg.Height
+		m.recalcViewportSize()
 		return m, nil
 
 	case telemetryTickMsg:
@@ -479,6 +539,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				} else {
 					m.TelemetryBuffer = msg.buffer
 				}
+				cleanText := cleanAnsiAndTabs(m.TelemetryBuffer)
+				m.Viewport.SetContent(cleanText)
+				m.Viewport.GotoBottom()
 			}
 		}
 		return m, nil
@@ -589,11 +652,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if m.ActiveTab == TabFleet {
 				m.ActiveTab = TabSpawner
+				m.TelemetryBuffer = "[Select an active agent to view telemetry]"
+				m.Viewport.SetContent(" [Select an active agent to view telemetry]")
+				return m, nil
 			} else {
 				m.ActiveTab = TabFleet
 				m.refreshFleet()
+				return m, m.queryTelemetryCmd()
 			}
-			return m, nil
 
 		case "r", "R":
 			if m.ActiveTab == TabFleet && !m.IsError {
@@ -610,6 +676,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					item := m.TreeItems[m.SelectedTreeItem]
 					if item.IsFolder {
 						m.TelemetryBuffer = "[Select an active agent to view telemetry]"
+						m.Viewport.SetContent(" [Select an active agent to view telemetry]")
+						return m, nil
 					} else {
 						return m, m.queryTelemetryCmd()
 					}
@@ -659,6 +727,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					item := m.TreeItems[m.SelectedTreeItem]
 					if item.IsFolder {
 						m.TelemetryBuffer = "[Select an active agent to view telemetry]"
+						m.Viewport.SetContent(" [Select an active agent to view telemetry]")
+						return m, nil
 					} else {
 						return m, m.queryTelemetryCmd()
 					}
@@ -722,6 +792,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 							if ti.IsFolder && ti.Path == targetPath {
 								m.SelectedTreeItem = idx
 								m.TelemetryBuffer = "[Select an active agent to view telemetry]"
+								m.Viewport.SetContent(" [Select an active agent to view telemetry]")
 								break
 							}
 						}
@@ -1137,7 +1208,7 @@ func renderHeader(activeTab Tab, width int) string {
 }
 
 // View renders the TUI screen layout dynamically sizing to full screen window bounds
-func (m Model) View() string {
+func (m *Model) View() string {
 	// Guard fallback for tiny terminal layouts
 	if m.Width < 50 || m.Height < 10 {
 		return "Terminal screen size is too small to render dashboard."
@@ -1267,38 +1338,11 @@ func (m Model) View() string {
 		leftView := currentLeftPanelStyle.Render(strings.Join(leftLinesSubset, "\n"))
 
 		// Top Right Panel (Live Telemetry Viewport)
-		maxTelemetryContentLines := rightTopInnerHeight - 1
-		if maxTelemetryContentLines < 1 {
-			maxTelemetryContentLines = 1
-		}
-
-		var telemetryContentLines []string
 		if m.TelemetryBuffer == "" {
-			telemetryContentLines = append(telemetryContentLines, " [Select an active agent to view telemetry]")
-		} else {
-			rawLines := strings.Split(m.TelemetryBuffer, "\n")
-			// Slice off the bottom 8 interface helper lines (input prompt, status bar, and helper descriptions)
-			if len(rawLines) > 8 {
-				rawLines = rawLines[:len(rawLines)-8]
-			} else {
-				rawLines = nil
-			}
-			for _, rl := range rawLines {
-				// Truncate to rightInnerWidth-6 to perfectly prevent wrapping inside border and padding boundaries
-				telemetryContentLines = append(telemetryContentLines, " "+truncateStr(rl, rightInnerWidth-6))
-			}
+			m.Viewport.SetContent(" [Select an active agent to view telemetry]")
 		}
-
-		// Trim and Pad telemetry content exactly to maxTelemetryContentLines
-		if len(telemetryContentLines) > maxTelemetryContentLines {
-			telemetryContentLines = telemetryContentLines[len(telemetryContentLines)-maxTelemetryContentLines:]
-		}
-		for len(telemetryContentLines) < maxTelemetryContentLines {
-			telemetryContentLines = append(telemetryContentLines, "")
-		}
-
-		telemetryLines := []string{headerStyle.Render(" 󱚞  LIVE AGENT TELEMETRY")}
-		telemetryLines = append(telemetryLines, telemetryContentLines...)
+		viewportContent := m.Viewport.View()
+		telemetryLines := []string{headerStyle.Render(" 󱚞  LIVE AGENT TELEMETRY"), viewportContent}
 		rightTop := currentRightTopStyle.Render(strings.Join(telemetryLines, "\n"))
 
 		// Bottom Right Panel (Action Deck Viewport)
