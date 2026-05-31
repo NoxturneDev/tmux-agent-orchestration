@@ -28,7 +28,7 @@ func TestExtractActiveGoal(t *testing.T) {
 	tempDir := t.TempDir()
 
 	// Case 1: File doesn't exist
-	goal := extractActiveGoal(filepath.Join(tempDir, "non_existent.md"))
+	goal := ExtractActiveGoal(filepath.Join(tempDir, "non_existent.md"))
 	if goal != "[No active plan - Idle]" {
 		t.Errorf("Expected default idle goal for non-existent file, got %q", goal)
 	}
@@ -38,7 +38,7 @@ func TestExtractActiveGoal(t *testing.T) {
 	if err := os.WriteFile(emptyFile, []byte("   \n\n  \n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	goal = extractActiveGoal(emptyFile)
+	goal = ExtractActiveGoal(emptyFile)
 	if goal != "[No active plan - Idle]" {
 		t.Errorf("Expected default idle goal for empty file, got %q", goal)
 	}
@@ -49,7 +49,7 @@ func TestExtractActiveGoal(t *testing.T) {
 	if err := os.WriteFile(plainFile, []byte(plainContent), 0644); err != nil {
 		t.Fatal(err)
 	}
-	goal = extractActiveGoal(plainFile)
+	goal = ExtractActiveGoal(plainFile)
 	if goal != "This is a raw line of objective text" {
 		t.Errorf("Expected raw line trimmed, got %q", goal)
 	}
@@ -60,7 +60,7 @@ func TestExtractActiveGoal(t *testing.T) {
 	if err := os.WriteFile(mdFile, []byte(mdContent), 0644); err != nil {
 		t.Fatal(err)
 	}
-	goal = extractActiveGoal(mdFile)
+	goal = ExtractActiveGoal(mdFile)
 	if goal != "Critical Task Dispatcher" {
 		t.Errorf("Expected markdown prefix stripped and trimmed, got %q", goal)
 	}

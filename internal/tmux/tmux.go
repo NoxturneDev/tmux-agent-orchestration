@@ -587,3 +587,21 @@ func ListSessions() ([]string, error) {
 	return sessions, nil
 }
 
+// CapturePaneRaw captures the last 200 lines of the target pane's terminal buffer with ANSI escapes intact.
+func CapturePaneRaw(paneID string) (string, error) {
+	if paneID == "" {
+		return "", fmt.Errorf("empty pane ID")
+	}
+	cmd := exec.Command("tmux", "capture-pane", "-e", "-p", "-t", paneID, "-S", "-200")
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	err := cmd.Run()
+	if err != nil {
+		return "", fmt.Errorf("capture failed: %v", err)
+	}
+	return stdout.String(), nil
+}
+
+
