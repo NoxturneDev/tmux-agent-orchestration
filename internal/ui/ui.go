@@ -32,6 +32,7 @@ const (
 	SpawnerStateTarget
 	SpawnerStateWindow
 	SpawnerStateSplitDirection
+	SpawnerStateSession
 	SpawnerStateMacro
 	SpawnerStateExecuting
 )
@@ -149,6 +150,9 @@ type Model struct {
 	Windows        []string
 	SelectedWindow int
 
+	Sessions        []string
+	SelectedSession int
+
 	SplitDirections        []string
 	SelectedSplitDirection int
 
@@ -195,6 +199,8 @@ func InitialModel() Model {
 		SelectedTarget:         0,
 		Windows:                nil,
 		SelectedWindow:         0,
+		Sessions:               nil,
+		SelectedSession:        0,
 		SplitDirections:        []string{"Horizontal Split (-h)", "Vertical Split (-v)"},
 		SelectedSplitDirection: 0,
 		Macros:                 macros,
@@ -221,6 +227,18 @@ func (m *Model) populateWindowList() {
 	list := []string{"[ Active Window ]"}
 	list = append(list, wins...)
 	m.Windows = list
+}
+
+// populateSessionList queries active tmux sessions and appends an active session fallback
+func (m *Model) populateSessionList() {
+	sessions, err := tmux.ListSessions()
+	if err != nil {
+		m.Sessions = []string{"[ Active Session ]"}
+		return
+	}
+	list := []string{"[ Active Session ]"}
+	list = append(list, sessions...)
+	m.Sessions = list
 }
 
 
@@ -332,6 +350,10 @@ func (m Model) spawnAgentCmd() tea.Cmd {
 			} else {
 				splitDir = "-h"
 			}
+		} else { // TargetWindow
+			if m.SelectedSession > 0 && m.SelectedSession < len(m.Sessions) {
+				targetWindow = m.Sessions[m.SelectedSession]
+			}
 		}
 
 		paneID, err := tmux.SpawnAgent(selectedAgent, constructedPrompt, selectedDir, selectedTarget, targetWindow, splitDir)
@@ -359,6 +381,13 @@ func (m Model) getPreviewCommand() string {
 	var args []string
 	if selectedTarget == tmux.TargetWindow {
 		tmuxSubCmd = "new-window"
+		var targetSession string
+		if m.SelectedSession > 0 && m.SelectedSession < len(m.Sessions) {
+			targetSession = m.Sessions[m.SelectedSession]
+		}
+		if targetSession != "" {
+			args = append(args, "-t", targetSession+":")
+		}
 	} else {
 		tmuxSubCmd = "split-window"
 		var targetWindow string
@@ -530,7 +559,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 
-		case "r":
+		case "r", "R":
 			if m.ActiveTab == TabFleet && !m.IsError {
 				m.refreshFleet()
 			}
@@ -570,6 +599,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				case SpawnerStateSplitDirection:
 					if m.SelectedSplitDirection > 0 {
 						m.SelectedSplitDirection--
+					}
+				case SpawnerStateSession:
+					if m.SelectedSession > 0 {
+						m.SelectedSession--
 					}
 				case SpawnerStateMacro:
 					if m.SelectedMacro > 0 {
@@ -613,6 +646,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				case SpawnerStateSplitDirection:
 					if m.SelectedSplitDirection < len(m.SplitDirections)-1 {
 						m.SelectedSplitDirection++
+					}
+				case SpawnerStateSession:
+					if m.SelectedSession < len(m.Sessions)-1 {
+						m.SelectedSession++
 					}
 				case SpawnerStateMacro:
 					if m.SelectedMacro < len(m.Macros)-1 {
@@ -658,11 +695,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.SpawnerState = SpawnerStateTarget
 				case SpawnerStateSplitDirection:
 					m.SpawnerState = SpawnerStateWindow
+				case SpawnerStateSession:
+					m.SpawnerState = SpawnerStateTarget
 				case SpawnerStateMacro:
 					if m.Targets[m.SelectedTarget] == "Pane Split" {
 						m.SpawnerState = SpawnerStateSplitDirection
 					} else {
-						m.SpawnerState = SpawnerStateTarget
+						m.SpawnerState = SpawnerStateSession
 					}
 				case SpawnerStateExecuting:
 					m.SpawnerState = SpawnerStateMacro
@@ -729,7 +768,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.SelectedWindow = 0
 						m.SpawnerState = SpawnerStateWindow
 					} else {
-						m.SpawnerState = SpawnerStateMacro
+						m.populateSessionList()
+						m.SelectedSession = 0
+						m.SpawnerState = SpawnerStateSession
 					}
 
 				case SpawnerStateWindow:
@@ -739,9 +780,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				case SpawnerStateSplitDirection:
 					m.SpawnerState = SpawnerStateMacro
 
+				case SpawnerStateSession:
+					m.SpawnerState = SpawnerStateMacro
+
 				case SpawnerStateMacro:
 					m.SpawnerState = SpawnerStateExecuting
 					return m, m.spawnAgentCmd()
+
+				case SpawnerStateExecuting:
+					if m.ActivePaneID != "" {
+						err := tmux.TeleportToPane(m.ActivePaneID)
+						if err != nil {
+							m.ErrorMsg = fmt.Sprintf("Failed to teleport: %v", err)
+							m.IsError = true
+						} else {
+							m.ActiveTab = TabFleet
+							m.SpawnerState = SpawnerStateAgent
+							m.refreshFleet()
+						}
+					}
 				}
 			}
 
@@ -824,8 +881,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.SpawnerState = SpawnerStateAgent
 				case SpawnerStateTarget:
 					m.SpawnerState = SpawnerStateDir
-				case SpawnerStateMacro:
+				case SpawnerStateSession:
 					m.SpawnerState = SpawnerStateTarget
+				case SpawnerStateMacro:
+					if m.Targets[m.SelectedTarget] == "Pane Split" {
+						m.SpawnerState = SpawnerStateSplitDirection
+					} else {
+						m.SpawnerState = SpawnerStateSession
+					}
 				case SpawnerStateExecuting:
 					m.SpawnerState = SpawnerStateMacro
 				}
@@ -849,35 +912,43 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // Lip Gloss base styles
 var (
-	borderColor  = lipgloss.Color("62")  // Slate Blue
-	titleColor   = lipgloss.Color("205") // Pink/Purple Accent
-	accentColor  = lipgloss.Color("86")  // Cyan Accent
-	grayColor    = lipgloss.Color("240") // Dark gray
-	errorRed     = lipgloss.Color("196") // Red Accent
-	successGreen = lipgloss.Color("82")  // Green Accent
+	// Color Palette (Premium Indigo, Teal, Rose, Violet, Charcoal)
+	colorPurple    = lipgloss.Color("#818cf8") // Indigo-400
+	colorTeal      = lipgloss.Color("#2dd4bf") // Teal-400
+	colorPink      = lipgloss.Color("#f472b6") // Pink-400
+	colorAmber     = lipgloss.Color("#fbbf24") // Amber-400
+	colorSlate     = lipgloss.Color("#475569") // Slate-600
+	colorGray      = lipgloss.Color("#94a3b8") // Slate-400
+	colorDarkGray  = lipgloss.Color("#334155") // Slate-700
+	colorError     = lipgloss.Color("#fb7185") // Rose-400
+	colorSuccess   = lipgloss.Color("#34d399") // Emerald-400
+	colorMuted     = lipgloss.Color("#64748b") // Slate-500
+
+	borderColor  = colorPurple
+	titleColor   = colorPink
+	accentColor  = colorTeal
+	grayColor    = colorMuted
+	errorRed     = colorError
+	successGreen = colorSuccess
 
 	// Base panel styles (dimensions are configured dynamically inside View())
 	leftPanelStyle = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("99")). // Purple
 			PaddingLeft(1).
 			PaddingRight(1)
 
 	rightTopStyle = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("86")). // Cyan
 			PaddingLeft(1).
 			PaddingRight(1)
 
 	rightBottomStyle = lipgloss.NewStyle().
 				Border(lipgloss.RoundedBorder()).
-				BorderForeground(lipgloss.Color("86")). // Cyan
 				PaddingLeft(1).
 				PaddingRight(1)
 
 	rightSpawnerStyle = lipgloss.NewStyle().
 				Border(lipgloss.RoundedBorder()).
-				BorderForeground(lipgloss.Color("86")). // Cyan
 				PaddingLeft(1).
 				PaddingRight(1)
 
@@ -887,24 +958,53 @@ var (
 			Align(lipgloss.Center)
 
 	dividerStyle = lipgloss.NewStyle().
-			Foreground(borderColor).
+			Foreground(colorDarkGray).
 			Align(lipgloss.Center)
 
 	headerStyle = lipgloss.NewStyle().
-			Foreground(accentColor).
+			Foreground(colorTeal).
 			Bold(true)
 
 	selectedStyle = lipgloss.NewStyle().
-			Foreground(accentColor).
+			Foreground(colorPurple).
 			Bold(true)
 
+	selectedItemStyle = lipgloss.NewStyle().
+			Foreground(colorTeal).
+			Bold(true)
+
+	normalItemStyle = lipgloss.NewStyle().
+			Foreground(colorGray)
+
 	normalStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("252"))
+			Foreground(lipgloss.Color("#f1f5f9"))
 
 	helpStyle = lipgloss.NewStyle().
-			Foreground(grayColor).
+			Foreground(colorMuted).
 			Italic(true)
 )
+
+// getAgentIcon returns an elegant icon representing the AI agent brand/CLI command
+func getAgentIcon(command string) string {
+	cmd := strings.ToLower(command)
+	if strings.Contains(cmd, "agy") {
+		return "󰚩 "
+	}
+	if strings.Contains(cmd, "gemini") {
+		return " "
+	}
+	if strings.Contains(cmd, "claude") {
+		return "󰘧 "
+	}
+	return " "
+}
+
+// renderKeyHelp formats interactive keys as high-contrast tags
+func renderKeyHelp(key, desc string) string {
+	kStyle := lipgloss.NewStyle().Foreground(colorTeal).Bold(true)
+	dStyle := lipgloss.NewStyle().Foreground(colorGray)
+	return kStyle.Render(key) + " " + dStyle.Render(desc)
+}
 
 // truncateStr chops strings longer than maxLen and appends "..."
 func truncateStr(s string, maxLen int) string {
@@ -952,24 +1052,43 @@ func wrapStr(s string, limit int) string {
 
 // renderHeader aligns master tab rows horizontally across full terminal width
 func renderHeader(activeTab Tab, width int) string {
-	tWidth := width
+	var t1, t2 string
+	activeTabStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("#ffffff")).
+		Background(lipgloss.Color("#4f46e5")). // Deep Indigo
+		Padding(0, 2)
+
+	inactiveTabStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#94a3b8")).
+		Background(lipgloss.Color("#1e293b")). // Slate-800
+		Padding(0, 2)
+
 	if activeTab == TabFleet {
-		t1 := lipgloss.NewStyle().Foreground(accentColor).Bold(true).Render("[ 1. FLEET RADAR ]")
-		t2 := lipgloss.NewStyle().Foreground(grayColor).Render("2. Spawner")
-		bars := tWidth - 18 - 10 - 8
-		if bars < 2 {
-			bars = 2
-		}
-		return lipgloss.NewStyle().Foreground(borderColor).Render("=== ") + t1 + lipgloss.NewStyle().Foreground(borderColor).Render(" === ") + t2 + lipgloss.NewStyle().Foreground(borderColor).Render(" "+strings.Repeat("=", bars))
+		t1 = activeTabStyle.Render("󰚩  AI FLEET RADAR")
+		t2 = inactiveTabStyle.Render("  AGENT SPAWNER")
 	} else {
-		t1 := lipgloss.NewStyle().Foreground(grayColor).Render("1. Fleet Radar")
-		t2 := lipgloss.NewStyle().Foreground(accentColor).Bold(true).Render("[ 2. AGENT SPAWNER ]")
-		bars := tWidth - 14 - 20 - 8
-		if bars < 2 {
-			bars = 2
-		}
-		return lipgloss.NewStyle().Foreground(borderColor).Render("=== ") + t1 + lipgloss.NewStyle().Foreground(borderColor).Render(" === ") + t2 + lipgloss.NewStyle().Foreground(borderColor).Render(" "+strings.Repeat("=", bars))
+		t1 = inactiveTabStyle.Render("󰚩  AI FLEET RADAR")
+		t2 = activeTabStyle.Render("  AGENT SPAWNER")
 	}
+
+	tabSpacer := lipgloss.NewStyle().
+		Background(lipgloss.Color("#0f172a")).
+		Foreground(lipgloss.Color("#334155")).
+		Render(" ")
+
+	// Calculate remaining space for the bar
+	t1Len := lipgloss.Width(t1)
+	t2Len := lipgloss.Width(t2)
+	barLen := width - t1Len - t2Len - 4
+	if barLen < 2 {
+		barLen = 2
+	}
+	bar := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#334155")).
+		Render(strings.Repeat("━", barLen))
+
+	return tabSpacer + t1 + tabSpacer + t2 + tabSpacer + tabSpacer + bar
 }
 
 // View renders the TUI screen layout dynamically sizing to full screen window bounds
@@ -1006,10 +1125,20 @@ func (m Model) View() string {
 	rightBottomInnerHeight := rightBottomHeight - 2
 
 	// Set dynamic sizes on style structures
-	currentLeftPanelStyle := leftPanelStyle.Copy().Width(leftInnerWidth).Height(leftInnerHeight)
-	currentRightTopStyle := rightTopStyle.Copy().Width(rightInnerWidth).Height(rightTopInnerHeight)
-	currentRightBottomStyle := rightBottomStyle.Copy().Width(rightInnerWidth).Height(rightBottomInnerHeight)
-	currentRightSpawnerStyle := rightSpawnerStyle.Copy().Width(rightInnerWidth).Height(leftInnerHeight)
+	leftBorderColor := colorSlate
+	rightBorderColor := colorSlate
+	if m.ActiveTab == TabFleet {
+		leftBorderColor = colorPurple
+		rightBorderColor = colorTeal
+	} else {
+		leftBorderColor = colorTeal
+		rightBorderColor = colorPurple
+	}
+
+	currentLeftPanelStyle := leftPanelStyle.Copy().Width(leftInnerWidth).Height(leftInnerHeight).BorderForeground(leftBorderColor)
+	currentRightTopStyle := rightTopStyle.Copy().Width(rightInnerWidth).Height(rightTopInnerHeight).BorderForeground(rightBorderColor)
+	currentRightBottomStyle := rightBottomStyle.Copy().Width(rightInnerWidth).Height(rightBottomInnerHeight).BorderForeground(rightBorderColor)
+	currentRightSpawnerStyle := rightSpawnerStyle.Copy().Width(rightInnerWidth).Height(leftInnerHeight).BorderForeground(rightBorderColor)
 
 	dividerStr := strings.Repeat("─", m.Width)
 
@@ -1021,7 +1150,7 @@ func (m Model) View() string {
 
 	// Row 2: Main Views
 	if m.IsError {
-		s.WriteString(lipgloss.NewStyle().Foreground(errorRed).Bold(true).Render("❌ SYSTEM ERROR") + "\n\n")
+		s.WriteString(lipgloss.NewStyle().Foreground(errorRed).Bold(true).Render("  SYSTEM ERROR") + "\n\n")
 		s.WriteString(lipgloss.NewStyle().Foreground(errorRed).Width(m.Width).Render(m.ErrorMsg) + "\n\n")
 		s.WriteString(dividerStyle.Render(dividerStr))
 		s.WriteString("\n")
@@ -1031,33 +1160,40 @@ func (m Model) View() string {
 		// ==================== TAB 1: FLEET RADAR ====================
 		// Left Panel (Radar Tree List)
 		var leftLines []string
+		leftLines = append(leftLines, headerStyle.Render(" 󰙅  ACTIVE RADAR FLEET")+"\n")
+		leftInnerHeight-- // leave 1 row for header
+
 		if len(m.TreeItems) == 0 {
 			leftLines = append(leftLines, "  [No running agents]")
 		} else {
 			for i, item := range m.TreeItems {
 				var renderLine string
 				if item.IsFolder {
-					collapsedSymbol := "▼"
+					collapsedSymbol := " "
 					if m.CollapsedPaths[item.Path] {
-						collapsedSymbol = "▶"
+						collapsedSymbol = " "
 					}
 					displayPath := formatDirPath(item.Path)
-					renderLine = fmt.Sprintf("%s %s", collapsedSymbol, displayPath)
-
 					if i == m.SelectedTreeItem {
-						leftLines = append(leftLines, selectedStyle.Render(fmt.Sprintf("> %s", truncateStr(renderLine, leftInnerWidth-2))))
+						folderStyle := lipgloss.NewStyle().Foreground(colorPurple).Bold(true)
+						renderLine = fmt.Sprintf("❯ %s%s", collapsedSymbol, folderStyle.Render(displayPath))
 					} else {
-						leftLines = append(leftLines, lipgloss.NewStyle().Foreground(lipgloss.Color("250")).Bold(true).Render(fmt.Sprintf("  %s", truncateStr(renderLine, leftInnerWidth-2))))
+						folderMutedStyle := lipgloss.NewStyle().Foreground(colorGray).Bold(true)
+						renderLine = fmt.Sprintf("  %s%s", collapsedSymbol, folderMutedStyle.Render(displayPath))
 					}
+					leftLines = append(leftLines, truncateStr(renderLine, leftInnerWidth))
 				} else {
 					pane := item.Pane
-					paneText := fmt.Sprintf("[%s] %s (W: %s)", pane.PaneID, pane.Command, pane.WindowID)
-
+					agentIcon := getAgentIcon(pane.Command)
 					if i == m.SelectedTreeItem {
-						leftLines = append(leftLines, selectedStyle.Render(fmt.Sprintf("  > %s", truncateStr(paneText, leftInnerWidth-4))))
+						leafSelectStyle := lipgloss.NewStyle().Foreground(colorTeal).Bold(true)
+						paneText := fmt.Sprintf("[%s] %s  %s (W: %s)", leafSelectStyle.Render(pane.PaneID), agentIcon, leafSelectStyle.Render(pane.Command), pane.WindowID)
+						renderLine = fmt.Sprintf("  └── ❯ %s", paneText)
 					} else {
-						leftLines = append(leftLines, normalStyle.Render(fmt.Sprintf("    %s", truncateStr(paneText, leftInnerWidth-4))))
+						paneText := fmt.Sprintf("[%s] %s  %s (W: %s)", pane.PaneID, agentIcon, pane.Command, pane.WindowID)
+						renderLine = fmt.Sprintf("  └──   %s", paneText)
 					}
+					leftLines = append(leftLines, truncateStr(renderLine, leftInnerWidth+10)) // account for ansi escape color bytes
 				}
 			}
 		}
@@ -1068,36 +1204,45 @@ func (m Model) View() string {
 			startIndex = m.SelectedTreeItem - leftInnerHeight + 1
 		}
 		endIndex := startIndex + leftInnerHeight
-		if endIndex > len(leftLines) {
+		if endIndex > len(leftLines)-1 { // offset by header
 			endIndex = len(leftLines)
 		}
-		leftLinesSubset := leftLines[startIndex:endIndex]
+		leftLinesSubset := []string{leftLines[0]} // always keep header row
+		leftLinesSubset = append(leftLinesSubset, leftLines[startIndex+1:endIndex]...)
 
-		for len(leftLinesSubset) < leftInnerHeight {
+		for len(leftLinesSubset) < leftInnerHeight+1 {
 			leftLinesSubset = append(leftLinesSubset, "")
 		}
 		leftView := currentLeftPanelStyle.Render(strings.Join(leftLinesSubset, "\n"))
 
 		// Top Right Panel (Live Telemetry Viewport)
 		var telemetryLines []string
+		telemetryLines = append(telemetryLines, headerStyle.Render(" 󱚞  LIVE AGENT TELEMETRY")+"\n")
+		rightTopInnerHeight-- // leave 1 row for header
+
 		if m.TelemetryBuffer == "" {
-			telemetryLines = append(telemetryLines, "[No active agent selected]")
+			telemetryLines = append(telemetryLines, " [No active agent selected]")
 		} else {
 			rawLines := strings.Split(m.TelemetryBuffer, "\n")
 			for _, rl := range rawLines {
-				telemetryLines = append(telemetryLines, truncateStr(rl, rightInnerWidth))
+				telemetryLines = append(telemetryLines, " "+truncateStr(rl, rightInnerWidth-2))
 			}
 		}
-		if len(telemetryLines) > rightTopInnerHeight {
+		if len(telemetryLines)-1 > rightTopInnerHeight {
+			headerLine := telemetryLines[0]
 			telemetryLines = telemetryLines[len(telemetryLines)-rightTopInnerHeight:]
+			telemetryLines = append([]string{headerLine}, telemetryLines...)
 		}
-		for len(telemetryLines) < rightTopInnerHeight {
+		for len(telemetryLines) < rightTopInnerHeight+1 {
 			telemetryLines = append(telemetryLines, "")
 		}
 		rightTop := currentRightTopStyle.Render(strings.Join(telemetryLines, "\n"))
 
 		// Bottom Right Panel (Action Deck Viewport)
 		var deckLines []string
+		deckLines = append(deckLines, headerStyle.Render(" 󰓅  ACTION DECK")+"\n")
+		rightBottomInnerHeight-- // leave 1 row for header
+
 		goalText := "[No active agent selected]"
 		if len(m.TreeItems) > 0 && m.SelectedTreeItem < len(m.TreeItems) {
 			item := m.TreeItems[m.SelectedTreeItem]
@@ -1107,22 +1252,33 @@ func (m Model) View() string {
 				goalText = "[Directory: " + filepath.Base(item.Path) + "]"
 			}
 		}
-		deckLines = append(deckLines, headerStyle.Render("Goal:")+" "+normalStyle.Render(truncateStr(goalText, rightInnerWidth-6)))
+		deckLines = append(deckLines, " "+lipgloss.NewStyle().Foreground(colorPurple).Bold(true).Render("󰓎  Target Goal:")+" "+normalStyle.Render(truncateStr(goalText, rightInnerWidth-18)))
 
 		// Fill in dynamic controls to align footer to panel limits
-		if rightBottomInnerHeight >= 4 {
+		if rightBottomInnerHeight >= 5 {
 			deckLines = append(deckLines, "")
-			deckLines = append(deckLines, helpStyle.Render("[Enter] Teleport  [m] Magnet   [e] Isolate"))
-			deckLines = append(deckLines, helpStyle.Render("[x] Kill Pane     [i] Compose  [r] Refresh  [tab] Spawner"))
-		} else if rightBottomInnerHeight >= 2 {
-			deckLines = append(deckLines, helpStyle.Render("Enter: Teleport • m: Magnet • e: Isolate • x: Kill • i: Compose • r: Refresh"))
+			row1 := []string{
+				renderKeyHelp("Enter", "Teleport"),
+				renderKeyHelp("m", "Magnet"),
+				renderKeyHelp("e", "Isolate"),
+			}
+			row2 := []string{
+				renderKeyHelp("x", "Kill Pane"),
+				renderKeyHelp("i", "Compose"),
+				renderKeyHelp("r/R", "Refresh"),
+				renderKeyHelp("Tab", "Spawner"),
+			}
+			deckLines = append(deckLines, " "+strings.Join(row1, "  •  "))
+			deckLines = append(deckLines, " "+strings.Join(row2, "  •  "))
+		} else if rightBottomInnerHeight >= 3 {
+			deckLines = append(deckLines, " "+renderKeyHelp("Enter", "Teleport")+" • "+renderKeyHelp("m", "Magnet")+" • "+renderKeyHelp("e", "Isolate")+" • "+renderKeyHelp("x", "Kill")+" • "+renderKeyHelp("i", "Compose"))
 		}
 
-		for len(deckLines) < rightBottomInnerHeight {
+		for len(deckLines) < rightBottomInnerHeight+1 {
 			deckLines = append(deckLines, "")
 		}
-		if len(deckLines) > rightBottomInnerHeight {
-			deckLines = deckLines[:rightBottomInnerHeight]
+		if len(deckLines) > rightBottomInnerHeight+1 {
+			deckLines = deckLines[:rightBottomInnerHeight+1]
 		}
 		rightBottom := currentRightBottomStyle.Render(strings.Join(deckLines, "\n"))
 
@@ -1137,55 +1293,66 @@ func (m Model) View() string {
 		var leftLines []string
 		switch m.SpawnerState {
 		case SpawnerStateAgent:
-			leftLines = append(leftLines, headerStyle.Render("Select Agent:")+"\n")
+			leftLines = append(leftLines, headerStyle.Render(" 󰚩  SELECT AGENT")+"\n")
 			for i, agent := range m.Agents {
+				icon := getAgentIcon(agent)
 				if i == m.SelectedAgent {
-					leftLines = append(leftLines, selectedStyle.Render(fmt.Sprintf(" > %s", agent)))
+					leftLines = append(leftLines, selectedItemStyle.Render(fmt.Sprintf(" ❯ %s  %s", icon, agent)))
 				} else {
-					leftLines = append(leftLines, normalStyle.Render(fmt.Sprintf("   %s", agent)))
+					leftLines = append(leftLines, normalItemStyle.Render(fmt.Sprintf("   %s  %s", icon, agent)))
 				}
 			}
 
 		case SpawnerStateDir:
-			leftLines = append(leftLines, normalStyle.Render(fmt.Sprintf("Agent: %s", selectedStyle.Render(m.Agents[m.SelectedAgent]))))
-			leftLines = append(leftLines, normalStyle.Render(fmt.Sprintf("Path:  %s\n", selectedStyle.Render(truncateStr(formatDirPath(m.CurrentDirPath), leftInnerWidth-8)))))
-			leftLines = append(leftLines, headerStyle.Render("Select Directory:")+"\n")
+			leftLines = append(leftLines, " "+normalStyle.Render(fmt.Sprintf("Agent: %s", selectedItemStyle.Render(m.Agents[m.SelectedAgent]))))
+			leftLines = append(leftLines, " "+normalStyle.Render(fmt.Sprintf("Path:  %s\n", selectedItemStyle.Render(truncateStr(formatDirPath(m.CurrentDirPath), leftInnerWidth-8)))))
+			leftLines = append(leftLines, headerStyle.Render("   SELECT DIRECTORY")+"\n")
 
 			for i, dir := range m.Dirs {
 				var displayDir string
+				var icon string
 				if dir == "[ Select This Directory ]" {
 					displayDir = "[ Select This Directory ]"
+					icon = "󰓾 "
 				} else if dir == ".." {
 					displayDir = ".. (Go Up)"
+					icon = " "
 				} else {
 					displayDir = filepath.Base(dir)
+					icon = " "
 				}
 
 				if i == m.SelectedDir {
-					leftLines = append(leftLines, selectedStyle.Render(fmt.Sprintf(" > %s", truncateStr(displayDir, leftInnerWidth-4))))
+					leftLines = append(leftLines, selectedItemStyle.Render(fmt.Sprintf(" ❯ %s  %s", icon, truncateStr(displayDir, leftInnerWidth-6))))
 				} else {
-					leftLines = append(leftLines, normalStyle.Render(fmt.Sprintf("   %s", truncateStr(displayDir, leftInnerWidth-4))))
+					leftLines = append(leftLines, normalItemStyle.Render(fmt.Sprintf("   %s  %s", icon, truncateStr(displayDir, leftInnerWidth-6))))
 				}
 			}
 
 		case SpawnerStateTarget:
-			leftLines = append(leftLines, normalStyle.Render(fmt.Sprintf("Agent: %s", selectedStyle.Render(m.Agents[m.SelectedAgent]))))
-			leftLines = append(leftLines, normalStyle.Render(fmt.Sprintf("Dir:   %s\n", selectedStyle.Render(truncateStr(formatDirPath(m.CurrentDirPath), leftInnerWidth-8)))))
-			leftLines = append(leftLines, headerStyle.Render("Select Target:")+"\n")
+			leftLines = append(leftLines, " "+normalStyle.Render(fmt.Sprintf("Agent: %s", selectedItemStyle.Render(m.Agents[m.SelectedAgent]))))
+			leftLines = append(leftLines, " "+normalStyle.Render(fmt.Sprintf("Dir:   %s\n", selectedItemStyle.Render(truncateStr(formatDirPath(m.CurrentDirPath), leftInnerWidth-8)))))
+			leftLines = append(leftLines, headerStyle.Render("   SELECT LAYOUT TARGET")+"\n")
 
 			for i, target := range m.Targets {
-				if i == m.SelectedTarget {
-					leftLines = append(leftLines, selectedStyle.Render(fmt.Sprintf(" > %s", target)))
+				var icon string
+				if target == "Pane Split" {
+					icon = " "
 				} else {
-					leftLines = append(leftLines, normalStyle.Render(fmt.Sprintf("   %s", target)))
+					icon = " "
+				}
+				if i == m.SelectedTarget {
+					leftLines = append(leftLines, selectedItemStyle.Render(fmt.Sprintf(" ❯ %s  %s", icon, target)))
+				} else {
+					leftLines = append(leftLines, normalItemStyle.Render(fmt.Sprintf("   %s  %s", icon, target)))
 				}
 			}
 
 		case SpawnerStateWindow:
-			leftLines = append(leftLines, normalStyle.Render(fmt.Sprintf("Agent:  %s", selectedStyle.Render(m.Agents[m.SelectedAgent]))))
-			leftLines = append(leftLines, normalStyle.Render(fmt.Sprintf("Dir:    %s", selectedStyle.Render(truncateStr(formatDirPath(m.CurrentDirPath), leftInnerWidth-8)))))
-			leftLines = append(leftLines, normalStyle.Render(fmt.Sprintf("Layout: %s\n", selectedStyle.Render(m.Targets[m.SelectedTarget]))))
-			leftLines = append(leftLines, headerStyle.Render("Select Target Window:")+"\n")
+			leftLines = append(leftLines, " "+normalStyle.Render(fmt.Sprintf("Agent:  %s", selectedItemStyle.Render(m.Agents[m.SelectedAgent]))))
+			leftLines = append(leftLines, " "+normalStyle.Render(fmt.Sprintf("Dir:    %s", selectedItemStyle.Render(truncateStr(formatDirPath(m.CurrentDirPath), leftInnerWidth-8)))))
+			leftLines = append(leftLines, " "+normalStyle.Render(fmt.Sprintf("Layout: %s\n", selectedItemStyle.Render(m.Targets[m.SelectedTarget]))))
+			leftLines = append(leftLines, headerStyle.Render("   SELECT TARGET WINDOW")+"\n")
 
 			headerLen := 5 // number of lines prepended above
 			availHeight := leftInnerHeight - headerLen - 1
@@ -1196,9 +1363,9 @@ func (m Model) View() string {
 			var listLines []string
 			for i, win := range m.Windows {
 				if i == m.SelectedWindow {
-					listLines = append(listLines, selectedStyle.Render(fmt.Sprintf(" > %s", truncateStr(win, leftInnerWidth-4))))
+					listLines = append(listLines, selectedItemStyle.Render(fmt.Sprintf(" ❯   %s", truncateStr(win, leftInnerWidth-6))))
 				} else {
-					listLines = append(listLines, normalStyle.Render(fmt.Sprintf("   %s", truncateStr(win, leftInnerWidth-4))))
+					listLines = append(listLines, normalItemStyle.Render(fmt.Sprintf("     %s", truncateStr(win, leftInnerWidth-6))))
 				}
 			}
 
@@ -1214,30 +1381,68 @@ func (m Model) View() string {
 			leftLines = append(leftLines, listSubset...)
 
 		case SpawnerStateSplitDirection:
-			leftLines = append(leftLines, normalStyle.Render(fmt.Sprintf("Agent:  %s", selectedStyle.Render(m.Agents[m.SelectedAgent]))))
-			leftLines = append(leftLines, normalStyle.Render(fmt.Sprintf("Dir:    %s", selectedStyle.Render(truncateStr(formatDirPath(m.CurrentDirPath), leftInnerWidth-8)))))
-			leftLines = append(leftLines, normalStyle.Render(fmt.Sprintf("Layout: %s", selectedStyle.Render(m.Targets[m.SelectedTarget]))))
+			leftLines = append(leftLines, " "+normalStyle.Render(fmt.Sprintf("Agent:  %s", selectedItemStyle.Render(m.Agents[m.SelectedAgent]))))
+			leftLines = append(leftLines, " "+normalStyle.Render(fmt.Sprintf("Dir:    %s", selectedItemStyle.Render(truncateStr(formatDirPath(m.CurrentDirPath), leftInnerWidth-8)))))
+			leftLines = append(leftLines, " "+normalStyle.Render(fmt.Sprintf("Layout: %s", selectedItemStyle.Render(m.Targets[m.SelectedTarget]))))
 			var winStr string
 			if m.SelectedWindow > 0 && m.SelectedWindow < len(m.Windows) {
 				winStr = m.Windows[m.SelectedWindow]
 			} else {
 				winStr = "[ Active Window ]"
 			}
-			leftLines = append(leftLines, normalStyle.Render(fmt.Sprintf("Window: %s\n", selectedStyle.Render(truncateStr(winStr, leftInnerWidth-9)))))
-			leftLines = append(leftLines, headerStyle.Render("Select Split Direction:")+"\n")
+			leftLines = append(leftLines, " "+normalStyle.Render(fmt.Sprintf("Window: %s\n", selectedItemStyle.Render(truncateStr(winStr, leftInnerWidth-9)))))
+			leftLines = append(leftLines, headerStyle.Render("   SELECT SPLIT DIRECTION")+"\n")
 
 			for i, dir := range m.SplitDirections {
-				if i == m.SelectedSplitDirection {
-					leftLines = append(leftLines, selectedStyle.Render(fmt.Sprintf(" > %s", dir)))
+				var icon string
+				if strings.Contains(dir, "Vertical") {
+					icon = " "
 				} else {
-					leftLines = append(leftLines, normalStyle.Render(fmt.Sprintf("   %s", dir)))
+					icon = " "
+				}
+				if i == m.SelectedSplitDirection {
+					leftLines = append(leftLines, selectedItemStyle.Render(fmt.Sprintf(" ❯ %s  %s", icon, dir)))
+				} else {
+					leftLines = append(leftLines, normalItemStyle.Render(fmt.Sprintf("   %s  %s", icon, dir)))
 				}
 			}
 
+		case SpawnerStateSession:
+			leftLines = append(leftLines, " "+normalStyle.Render(fmt.Sprintf("Agent:  %s", selectedItemStyle.Render(m.Agents[m.SelectedAgent]))))
+			leftLines = append(leftLines, " "+normalStyle.Render(fmt.Sprintf("Dir:    %s", selectedItemStyle.Render(truncateStr(formatDirPath(m.CurrentDirPath), leftInnerWidth-8)))))
+			leftLines = append(leftLines, " "+normalStyle.Render(fmt.Sprintf("Layout: %s\n", selectedItemStyle.Render(m.Targets[m.SelectedTarget]))))
+			leftLines = append(leftLines, headerStyle.Render("   SELECT TARGET SESSION")+"\n")
+
+			headerLen := 5 // number of lines prepended above
+			availHeight := leftInnerHeight - headerLen - 1
+			if availHeight < 2 {
+				availHeight = 2
+			}
+
+			var listLines []string
+			for i, sess := range m.Sessions {
+				if i == m.SelectedSession {
+					listLines = append(listLines, selectedItemStyle.Render(fmt.Sprintf(" ❯ %s  %s", " ", truncateStr(sess, leftInnerWidth-6))))
+				} else {
+					listLines = append(listLines, normalItemStyle.Render(fmt.Sprintf("   %s  %s", " ", truncateStr(sess, leftInnerWidth-6))))
+				}
+			}
+
+			startIndex := 0
+			if m.SelectedSession >= availHeight {
+				startIndex = m.SelectedSession - availHeight + 1
+			}
+			endIndex := startIndex + availHeight
+			if endIndex > len(listLines) {
+				endIndex = len(listLines)
+			}
+			listSubset := listLines[startIndex:endIndex]
+			leftLines = append(leftLines, listSubset...)
+
 		case SpawnerStateMacro:
-			leftLines = append(leftLines, normalStyle.Render(fmt.Sprintf("Agent:  %s", selectedStyle.Render(m.Agents[m.SelectedAgent]))))
-			leftLines = append(leftLines, normalStyle.Render(fmt.Sprintf("Dir:    %s", selectedStyle.Render(truncateStr(formatDirPath(m.CurrentDirPath), leftInnerWidth-9)))))
-			leftLines = append(leftLines, normalStyle.Render(fmt.Sprintf("Layout: %s", selectedStyle.Render(m.Targets[m.SelectedTarget]))))
+			leftLines = append(leftLines, " "+normalStyle.Render(fmt.Sprintf("Agent:  %s", selectedItemStyle.Render(m.Agents[m.SelectedAgent]))))
+			leftLines = append(leftLines, " "+normalStyle.Render(fmt.Sprintf("Dir:    %s", selectedItemStyle.Render(truncateStr(formatDirPath(m.CurrentDirPath), leftInnerWidth-9)))))
+			leftLines = append(leftLines, " "+normalStyle.Render(fmt.Sprintf("Layout: %s", selectedItemStyle.Render(m.Targets[m.SelectedTarget]))))
 			if m.Targets[m.SelectedTarget] == "Pane Split" {
 				var winStr string
 				if m.SelectedWindow > 0 && m.SelectedWindow < len(m.Windows) {
@@ -1245,33 +1450,52 @@ func (m Model) View() string {
 				} else {
 					winStr = "[ Active Window ]"
 				}
-				leftLines = append(leftLines, normalStyle.Render(fmt.Sprintf("Window: %s", selectedStyle.Render(truncateStr(winStr, leftInnerWidth-9)))))
+				leftLines = append(leftLines, " "+normalStyle.Render(fmt.Sprintf("Window: %s", selectedItemStyle.Render(truncateStr(winStr, leftInnerWidth-9)))))
 				var splitStr string
 				if m.SelectedSplitDirection == 1 {
 					splitStr = "Vertical (-v)"
 				} else {
 					splitStr = "Horizontal (-h)"
 				}
-				leftLines = append(leftLines, normalStyle.Render(fmt.Sprintf("Split:  %s\n", selectedStyle.Render(splitStr))))
+				leftLines = append(leftLines, " "+normalStyle.Render(fmt.Sprintf("Split:  %s\n", selectedItemStyle.Render(splitStr))))
 			} else {
-				leftLines = append(leftLines, "")
+				var sessionStr string
+				if m.SelectedSession > 0 && m.SelectedSession < len(m.Sessions) {
+					sessionStr = m.Sessions[m.SelectedSession]
+				} else {
+					sessionStr = "[ Active Session ]"
+				}
+				leftLines = append(leftLines, " "+normalStyle.Render(fmt.Sprintf("Session: %s\n\n", selectedItemStyle.Render(truncateStr(sessionStr, leftInnerWidth-10)))))
 			}
-			leftLines = append(leftLines, headerStyle.Render("Select Macro:")+"\n")
+			leftLines = append(leftLines, headerStyle.Render(" 󱐋  SELECT MACRO")+"\n")
 
 			macroNames := []string{"Just Spawn (No Macro)", "Implement", "Cook It", "Wrap It Up", "Recon"}
 			for i, name := range macroNames {
+				var icon string
+				switch name {
+				case "Just Spawn (No Macro)":
+					icon = " "
+				case "Implement":
+					icon = " "
+				case "Cook It":
+					icon = "󰠳 "
+				case "Wrap It Up":
+					icon = "󰏖 "
+				case "Recon":
+					icon = " "
+				}
 				if i == m.SelectedMacro {
-					leftLines = append(leftLines, selectedStyle.Render(fmt.Sprintf(" > %s", name)))
+					leftLines = append(leftLines, selectedItemStyle.Render(fmt.Sprintf(" ❯ %s  %s", icon, name)))
 				} else {
-					leftLines = append(leftLines, normalStyle.Render(fmt.Sprintf("   %s", name)))
+					leftLines = append(leftLines, normalItemStyle.Render(fmt.Sprintf("   %s  %s", icon, name)))
 				}
 			}
 
 		case SpawnerStateExecuting:
-			leftLines = append(leftLines, lipgloss.NewStyle().Foreground(successGreen).Bold(true).Render("🚀 Agent Spawning...")+"\n")
-			leftLines = append(leftLines, fmt.Sprintf("Agent:  %s", normalStyle.Render(m.Agents[m.SelectedAgent])))
-			leftLines = append(leftLines, fmt.Sprintf("Dir:    %s", normalStyle.Render(truncateStr(formatDirPath(m.CurrentDirPath), leftInnerWidth-9))))
-			leftLines = append(leftLines, fmt.Sprintf("Layout: %s", normalStyle.Render(m.Targets[m.SelectedTarget])))
+			leftLines = append(leftLines, lipgloss.NewStyle().Foreground(colorSuccess).Bold(true).Render("   AGENT SPAWNING...")+"\n")
+			leftLines = append(leftLines, " "+fmt.Sprintf("Agent:  %s", normalStyle.Render(m.Agents[m.SelectedAgent])))
+			leftLines = append(leftLines, " "+fmt.Sprintf("Dir:    %s", normalStyle.Render(truncateStr(formatDirPath(m.CurrentDirPath), leftInnerWidth-9))))
+			leftLines = append(leftLines, " "+fmt.Sprintf("Layout: %s", normalStyle.Render(m.Targets[m.SelectedTarget])))
 			if m.Targets[m.SelectedTarget] == "Pane Split" {
 				var winStr string
 				if m.SelectedWindow > 0 && m.SelectedWindow < len(m.Windows) {
@@ -1279,18 +1503,26 @@ func (m Model) View() string {
 				} else {
 					winStr = "[ Active Window ]"
 				}
-				leftLines = append(leftLines, fmt.Sprintf("Window: %s", normalStyle.Render(truncateStr(winStr, leftInnerWidth-9))))
+				leftLines = append(leftLines, " "+fmt.Sprintf("Window: %s", normalStyle.Render(truncateStr(winStr, leftInnerWidth-9))))
 				var splitStr string
 				if m.SelectedSplitDirection == 1 {
 					splitStr = "Vertical (-v)"
 				} else {
 					splitStr = "Horizontal (-h)"
 				}
-				leftLines = append(leftLines, fmt.Sprintf("Split:  %s", normalStyle.Render(splitStr)))
+				leftLines = append(leftLines, " "+fmt.Sprintf("Split:  %s", normalStyle.Render(splitStr)))
+			} else {
+				var sessionStr string
+				if m.SelectedSession > 0 && m.SelectedSession < len(m.Sessions) {
+					sessionStr = m.Sessions[m.SelectedSession]
+				} else {
+					sessionStr = "[ Active Session ]"
+				}
+				leftLines = append(leftLines, " "+fmt.Sprintf("Session: %s", normalStyle.Render(truncateStr(sessionStr, leftInnerWidth-10))))
 			}
 			macroNames := []string{"Just Spawn (No Macro)", "Implement", "Cook It", "Wrap It Up", "Recon"}
-			leftLines = append(leftLines, fmt.Sprintf("Macro:  %s", normalStyle.Render(macroNames[m.SelectedMacro])))
-			leftLines = append(leftLines, fmt.Sprintf("ID:     %s", selectedStyle.Render(m.ActivePaneID)))
+			leftLines = append(leftLines, " "+fmt.Sprintf("Macro:  %s", normalStyle.Render(macroNames[m.SelectedMacro])))
+			leftLines = append(leftLines, " "+fmt.Sprintf("Pane:   %s", selectedItemStyle.Render(m.ActivePaneID)))
 		}
 
 		if len(leftLines) > leftInnerHeight {
@@ -1303,31 +1535,33 @@ func (m Model) View() string {
 
 		// Right Spawner Panel (Command Preview Viewport)
 		var rightLines []string
-		rightLines = append(rightLines, headerStyle.Render("=== SPAWN PREVIEW ===")+"\n")
+		rightLines = append(rightLines, headerStyle.Render("   TMUX SPAWN COMMAND PREVIEW")+"\n")
 
 		var previewContent string
 		if m.SpawnerState != SpawnerStateExecuting {
-			previewContent = wrapStr(m.getPreviewCommand(), rightInnerWidth)
+			previewContent = wrapStr(m.getPreviewCommand(), rightInnerWidth-2)
 		} else {
 			previewContent = "Process successfully launched in target session."
 		}
 
 		rawPreviewLines := strings.Split(previewContent, "\n")
 		for _, rl := range rawPreviewLines {
-			rightLines = append(rightLines, helpStyle.Render(rl))
+			rightLines = append(rightLines, " "+helpStyle.Render(rl))
 		}
 
 		var footerHelp string
 		if m.SpawnerState == SpawnerStateDir {
-			footerHelp = "↑/↓: move • enter: select • f: search (fzf) • esc: back"
+			footerHelp = renderKeyHelp("↑/↓", "move") + " • " + renderKeyHelp("Enter", "select") + " • " + renderKeyHelp("f", "fzf search") + " • " + renderKeyHelp("Esc", "back")
+		} else if m.SpawnerState == SpawnerStateExecuting {
+			footerHelp = renderKeyHelp("Enter", "teleport to agent pane") + " • " + renderKeyHelp("Esc", "back")
 		} else {
-			footerHelp = "↑/↓: move • enter: select • esc: back"
+			footerHelp = renderKeyHelp("↑/↓", "move") + " • " + renderKeyHelp("Enter", "select") + " • " + renderKeyHelp("Esc", "back")
 		}
 
 		footerLines := []string{
 			"",
 			dividerStyle.Render(strings.Repeat("─", rightInnerWidth)),
-			helpStyle.Render(footerHelp),
+			" " + footerHelp,
 		}
 
 		usedLines := len(rightLines) + len(footerLines)
