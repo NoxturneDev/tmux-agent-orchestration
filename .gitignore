@@ -1,0 +1,5 @@
+# Binaries
+tmux-ai-operator
+
+# Workspace state tracking
+.agents/
