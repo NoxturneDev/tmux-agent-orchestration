@@ -1187,10 +1187,10 @@ func (m Model) View() string {
 					agentIcon := getAgentIcon(pane.Command)
 					if i == m.SelectedTreeItem {
 						leafSelectStyle := lipgloss.NewStyle().Foreground(colorTeal).Bold(true)
-						paneText := fmt.Sprintf("[%s] %s  %s (W: %s)", leafSelectStyle.Render(pane.PaneID), agentIcon, leafSelectStyle.Render(pane.Command), pane.WindowID)
+						paneText := fmt.Sprintf("%s  %s (W: %s)", agentIcon, leafSelectStyle.Render(pane.Command), pane.WindowID)
 						renderLine = fmt.Sprintf("  └── ❯ %s", paneText)
 					} else {
-						paneText := fmt.Sprintf("[%s] %s  %s (W: %s)", pane.PaneID, agentIcon, pane.Command, pane.WindowID)
+						paneText := fmt.Sprintf("%s  %s (W: %s)", agentIcon, pane.Command, pane.WindowID)
 						renderLine = fmt.Sprintf("  └──   %s", paneText)
 					}
 					leftContentLines = append(leftContentLines, truncateStr(renderLine, leftInnerWidth+50))
