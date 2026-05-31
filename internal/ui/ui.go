@@ -449,6 +449,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case telemetryTickMsg:
 		var cmd tea.Cmd
 		if m.ActiveTab == TabFleet && !m.IsError {
+			m.refreshFleet() // Automatically refresh process scanning and active plan contexts
 			cmd = m.queryTelemetryCmd()
 		}
 		return m, tea.Batch(cmd, tickTelemetry())
@@ -1286,18 +1287,18 @@ func (m Model) View() string {
 			}
 		}
 
-		// 1. Render "Target Goal" label on its own line without the ":"
-		deckContentLines = append(deckContentLines, " "+lipgloss.NewStyle().Foreground(colorPurple).Bold(true).Render("  Target Goal"))
-
-		// 2. Render the active plan text on the line below with a premium background color
-		planStyle := lipgloss.NewStyle().
+		// 1. Render "ACTIVE PLAN" label with a premium background color
+		labelStyle := lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#1e1e2e")). // elegant dark charcoal text
 			Background(colorPurple).               // Indigo background
 			PaddingLeft(1).
 			PaddingRight(1).
 			Bold(true)
 
-		deckContentLines = append(deckContentLines, "  "+planStyle.Render(truncateStr(goalText, rightInnerWidth-6)))
+		deckContentLines = append(deckContentLines, " "+labelStyle.Render("󰓎  ACTIVE PLAN"))
+
+		// 2. Render the active plan detail text on the line below without background color
+		deckContentLines = append(deckContentLines, "  "+normalStyle.Render(truncateStr(goalText, rightInnerWidth-6)))
 
 		// Fill in dynamic controls to align footer to panel limits
 		if maxDeckContentLines >= 4 {
