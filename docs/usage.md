@@ -7,7 +7,8 @@ A premium TUI dashboard and command deck built in Go using bubbletea and lipglos
 ### 1. AI Fleet Radar (Active Radar Fleet)
 - **Host-Level Process Scanning**: Bypasses container and sandbox namespace isolation by querying the host process list via `tmux run-shell`.
 - **Recursive Process Traversal**: Identifies background-running agent processes (like Node-based `gemini` or `nsjail`-sandboxed `agy` instances) by parsing the process tree and command-line arguments.
-- **Live Telemetry Viewport**: Renders real-time outputs and telemetry buffers from selected active agent panes.
+- **Live Telemetry Viewport**: Real-time snappy telemetry polling (100ms interval) of pane output buffers with intact ANSI escapes, rendering terminal colors perfectly.
+- **Auto-Scrolling Viewport**: Integrates `github.com/charmbracelet/bubbles/viewport` to render telemetry outputs cleanly with real-time `GotoBottom()` auto-scrolling that mimics a native terminal window.
 - **Goal Extraction**: Auto-extracts target objectives from local active agent plans (`.agents/plan/active_plan.md`) for quick overview.
 
 ### 2. Agent Spawner
