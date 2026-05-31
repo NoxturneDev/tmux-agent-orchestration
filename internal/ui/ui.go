@@ -241,7 +241,6 @@ func (m *Model) populateSessionList() {
 	m.Sessions = list
 }
 
-
 // refreshFleet queries tmux and rebuilds the folder tree
 func (m *Model) refreshFleet() {
 	panes, err := tmux.ListAgentPanes()
@@ -413,7 +412,6 @@ func (m Model) getPreviewCommand() string {
 	args = append(args, "-P", "-F", "\"#{pane_id}\"", fmt.Sprintf("\"%s\"", innerCmd))
 	return fmt.Sprintf("tmux %s %s", tmuxSubCmd, strings.Join(args, " "))
 }
-
 
 // queryTelemetryCmd fires capture-pane query on highlighted pane
 func (m Model) queryTelemetryCmd() tea.Cmd {
@@ -908,16 +906,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // Lip Gloss base styles
 var (
 	// Color Palette (Premium Indigo, Teal, Rose, Violet, Charcoal)
-	colorPurple    = lipgloss.Color("#818cf8") // Indigo-400
-	colorTeal      = lipgloss.Color("#2dd4bf") // Teal-400
-	colorPink      = lipgloss.Color("#f472b6") // Pink-400
-	colorAmber     = lipgloss.Color("#fbbf24") // Amber-400
-	colorSlate     = lipgloss.Color("#475569") // Slate-600
-	colorGray      = lipgloss.Color("#94a3b8") // Slate-400
-	colorDarkGray  = lipgloss.Color("#334155") // Slate-700
-	colorError     = lipgloss.Color("#fb7185") // Rose-400
-	colorSuccess   = lipgloss.Color("#34d399") // Emerald-400
-	colorMuted     = lipgloss.Color("#64748b") // Slate-500
+	colorPurple   = lipgloss.Color("#818cf8") // Indigo-400
+	colorTeal     = lipgloss.Color("#2dd4bf") // Teal-400
+	colorPink     = lipgloss.Color("#f472b6") // Pink-400
+	colorAmber    = lipgloss.Color("#fbbf24") // Amber-400
+	colorSlate    = lipgloss.Color("#475569") // Slate-600
+	colorGray     = lipgloss.Color("#94a3b8") // Slate-400
+	colorDarkGray = lipgloss.Color("#334155") // Slate-700
+	colorError    = lipgloss.Color("#fb7185") // Rose-400
+	colorSuccess  = lipgloss.Color("#34d399") // Emerald-400
+	colorMuted    = lipgloss.Color("#64748b") // Slate-500
 
 	borderColor  = colorPurple
 	titleColor   = colorPink
@@ -965,8 +963,8 @@ var (
 			Bold(true)
 
 	selectedItemStyle = lipgloss.NewStyle().
-			Foreground(colorTeal).
-			Bold(true)
+				Foreground(colorTeal).
+				Bold(true)
 
 	normalItemStyle = lipgloss.NewStyle().
 			Foreground(colorGray)
@@ -1157,12 +1155,14 @@ func (m Model) View() string {
 	} else if m.ActiveTab == TabFleet {
 		// ==================== TAB 1: FLEET RADAR ====================
 		// Left Panel (Radar Tree List)
-		var leftLines []string
-		leftLines = append(leftLines, headerStyle.Render(" 󰙅  ACTIVE RADAR FLEET")+"\n")
-		leftInnerHeight-- // leave 1 row for header
+		maxLeftContentLines := leftInnerHeight - 1
+		if maxLeftContentLines < 1 {
+			maxLeftContentLines = 1
+		}
 
+		var leftContentLines []string
 		if len(m.TreeItems) == 0 {
-			leftLines = append(leftLines, "  [No running agents]")
+			leftContentLines = append(leftContentLines, "  [No running agents]")
 		} else {
 			for i, item := range m.TreeItems {
 				var renderLine string
@@ -1181,7 +1181,7 @@ func (m Model) View() string {
 						symbolStyle := lipgloss.NewStyle().Foreground(colorAmber).Bold(true)
 						renderLine = fmt.Sprintf("  %s%s", symbolStyle.Render(collapsedSymbol), folderMutedStyle.Render(displayPath))
 					}
-					leftLines = append(leftLines, truncateStr(renderLine, leftInnerWidth+50))
+					leftContentLines = append(leftContentLines, truncateStr(renderLine, leftInnerWidth+50))
 				} else {
 					pane := item.Pane
 					agentIcon := getAgentIcon(pane.Command)
@@ -1193,56 +1193,89 @@ func (m Model) View() string {
 						paneText := fmt.Sprintf("[%s] %s  %s (W: %s)", pane.PaneID, agentIcon, pane.Command, pane.WindowID)
 						renderLine = fmt.Sprintf("  └──   %s", paneText)
 					}
-					leftLines = append(leftLines, truncateStr(renderLine, leftInnerWidth+50)) // account for ansi escape color bytes
+					leftContentLines = append(leftContentLines, truncateStr(renderLine, leftInnerWidth+50))
 				}
 			}
 		}
 
 		// Scroll tree view helper: keeps cursor focused within leftInnerHeight viewport limits
 		startIndex := 0
-		if m.SelectedTreeItem >= leftInnerHeight {
-			startIndex = m.SelectedTreeItem - leftInnerHeight + 1
+		if m.SelectedTreeItem >= maxLeftContentLines {
+			startIndex = m.SelectedTreeItem - maxLeftContentLines + 1
 		}
-		endIndex := startIndex + leftInnerHeight
-		if endIndex > len(leftLines)-1 { // offset by header
-			endIndex = len(leftLines)
+		endIndex := startIndex + maxLeftContentLines
+		if endIndex > len(leftContentLines) {
+			endIndex = len(leftContentLines)
 		}
-		leftLinesSubset := []string{leftLines[0]} // always keep header row
-		leftLinesSubset = append(leftLinesSubset, leftLines[startIndex+1:endIndex]...)
 
-		for len(leftLinesSubset) < leftInnerHeight+1 {
-			leftLinesSubset = append(leftLinesSubset, "")
+		slicedLeftContent := leftContentLines[startIndex:endIndex]
+		for len(slicedLeftContent) < maxLeftContentLines {
+			slicedLeftContent = append(slicedLeftContent, "")
 		}
+
+		leftLinesSubset := []string{headerStyle.Render(" 󰙅  ACTIVE RADAR FLEET")}
+		leftLinesSubset = append(leftLinesSubset, slicedLeftContent...)
 		leftView := currentLeftPanelStyle.Render(strings.Join(leftLinesSubset, "\n"))
 
 		// Top Right Panel (Live Telemetry Viewport)
-		var telemetryLines []string
-		telemetryLines = append(telemetryLines, headerStyle.Render(" 󱚞  LIVE AGENT TELEMETRY")+"\n")
-		rightTopInnerHeight-- // leave 1 row for header
+		maxTelemetryContentLines := rightTopInnerHeight - 1
+		if maxTelemetryContentLines < 1 {
+			maxTelemetryContentLines = 1
+		}
 
+		var telemetryContentLines []string
 		if m.TelemetryBuffer == "" {
-			telemetryLines = append(telemetryLines, " [No active agent selected]")
+			telemetryContentLines = append(telemetryContentLines, " [Select an active agent to view telemetry]")
 		} else {
 			rawLines := strings.Split(m.TelemetryBuffer, "\n")
+			// Slice off the bottom 8 interface helper lines (input prompt, status bar, and helper descriptions)
+			if len(rawLines) > 8 {
+				rawLines = rawLines[:len(rawLines)-8]
+			} else {
+				rawLines = nil
+			}
 			for _, rl := range rawLines {
-				telemetryLines = append(telemetryLines, " "+truncateStr(rl, rightInnerWidth-2))
+				// Truncate to rightInnerWidth-6 to perfectly prevent wrapping inside border and padding boundaries
+				telemetryContentLines = append(telemetryContentLines, " "+truncateStr(rl, rightInnerWidth-6))
 			}
 		}
-		if len(telemetryLines)-1 > rightTopInnerHeight {
-			headerLine := telemetryLines[0]
-			telemetryLines = telemetryLines[len(telemetryLines)-rightTopInnerHeight:]
-			telemetryLines = append([]string{headerLine}, telemetryLines...)
+
+		// Trim and Pad telemetry content exactly to maxTelemetryContentLines
+		if len(telemetryContentLines) > maxTelemetryContentLines {
+			telemetryContentLines = telemetryContentLines[len(telemetryContentLines)-maxTelemetryContentLines:]
 		}
-		for len(telemetryLines) < rightTopInnerHeight+1 {
-			telemetryLines = append(telemetryLines, "")
+		for len(telemetryContentLines) < maxTelemetryContentLines {
+			telemetryContentLines = append(telemetryContentLines, "")
 		}
+
+		telemetryLines := []string{headerStyle.Render(" 󱚞  LIVE AGENT TELEMETRY")}
+		telemetryLines = append(telemetryLines, telemetryContentLines...)
 		rightTop := currentRightTopStyle.Render(strings.Join(telemetryLines, "\n"))
 
 		// Bottom Right Panel (Action Deck Viewport)
-		var deckLines []string
-		deckLines = append(deckLines, headerStyle.Render(" 󰓅  ACTION DECK")+"\n")
-		rightBottomInnerHeight-- // leave 1 row for header
+		agentClient := ""
+		if len(m.TreeItems) > 0 && m.SelectedTreeItem < len(m.TreeItems) {
+			item := m.TreeItems[m.SelectedTreeItem]
+			if !item.IsFolder {
+				cmdLower := strings.ToLower(item.Pane.Command)
+				if strings.Contains(cmdLower, "agy") {
+					agentClient = "Antigravity"
+				} else if strings.Contains(cmdLower, "gemini") {
+					agentClient = "Gemini"
+				} else if strings.Contains(cmdLower, "claude") {
+					agentClient = "Claude"
+				} else {
+					agentClient = item.Pane.Command
+				}
+			}
+		}
 
+		maxDeckContentLines := rightBottomInnerHeight - 1
+		if maxDeckContentLines < 1 {
+			maxDeckContentLines = 1
+		}
+
+		var deckContentLines []string
 		goalText := "[No active agent selected]"
 		if len(m.TreeItems) > 0 && m.SelectedTreeItem < len(m.TreeItems) {
 			item := m.TreeItems[m.SelectedTreeItem]
@@ -1252,11 +1285,23 @@ func (m Model) View() string {
 				goalText = "[Directory: " + filepath.Base(item.Path) + "]"
 			}
 		}
-		deckLines = append(deckLines, " "+lipgloss.NewStyle().Foreground(colorPurple).Bold(true).Render("󰓎  Target Goal:")+" "+normalStyle.Render(truncateStr(goalText, rightInnerWidth-18)))
+
+		// 1. Render "Target Goal" label on its own line without the ":"
+		deckContentLines = append(deckContentLines, " "+lipgloss.NewStyle().Foreground(colorPurple).Bold(true).Render("  Target Goal"))
+
+		// 2. Render the active plan text on the line below with a premium background color
+		planStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#1e1e2e")). // elegant dark charcoal text
+			Background(colorPurple).               // Indigo background
+			PaddingLeft(1).
+			PaddingRight(1).
+			Bold(true)
+
+		deckContentLines = append(deckContentLines, "  "+planStyle.Render(truncateStr(goalText, rightInnerWidth-6)))
 
 		// Fill in dynamic controls to align footer to panel limits
-		if rightBottomInnerHeight >= 5 {
-			deckLines = append(deckLines, "")
+		if maxDeckContentLines >= 4 {
+			deckContentLines = append(deckContentLines, "")
 			row1 := []string{
 				renderKeyHelp("Enter", "Teleport"),
 				renderKeyHelp("m", "Magnet"),
@@ -1268,18 +1313,27 @@ func (m Model) View() string {
 				renderKeyHelp("r/R", "Refresh"),
 				renderKeyHelp("Tab", "Spawner"),
 			}
-			deckLines = append(deckLines, " "+strings.Join(row1, "  •  "))
-			deckLines = append(deckLines, " "+strings.Join(row2, "  •  "))
-		} else if rightBottomInnerHeight >= 3 {
-			deckLines = append(deckLines, " "+renderKeyHelp("Enter", "Teleport")+" • "+renderKeyHelp("m", "Magnet")+" • "+renderKeyHelp("e", "Isolate")+" • "+renderKeyHelp("x", "Kill")+" • "+renderKeyHelp("i", "Compose"))
+			deckContentLines = append(deckContentLines, " "+strings.Join(row1, "  •  "))
+			deckContentLines = append(deckContentLines, " "+strings.Join(row2, "  •  "))
+		} else if maxDeckContentLines >= 2 {
+			deckContentLines = append(deckContentLines, " "+renderKeyHelp("Enter", "Teleport")+" • "+renderKeyHelp("m", "Magnet")+" • "+renderKeyHelp("e", "Isolate")+" • "+renderKeyHelp("x", "Kill")+" • "+renderKeyHelp("i", "Compose"))
 		}
 
-		for len(deckLines) < rightBottomInnerHeight+1 {
-			deckLines = append(deckLines, "")
+		// Trim and Pad deck content exactly to maxDeckContentLines
+		if len(deckContentLines) > maxDeckContentLines {
+			deckContentLines = deckContentLines[:maxDeckContentLines]
 		}
-		if len(deckLines) > rightBottomInnerHeight+1 {
-			deckLines = deckLines[:rightBottomInnerHeight+1]
+		for len(deckContentLines) < maxDeckContentLines {
+			deckContentLines = append(deckContentLines, "")
 		}
+
+		var deckLines []string
+		if agentClient != "" {
+			deckLines = append(deckLines, headerStyle.Render(" 󰓅  ACTION DECK")+"  "+lipgloss.NewStyle().Foreground(colorTeal).Bold(true).Render("("+agentClient+")"))
+		} else {
+			deckLines = append(deckLines, headerStyle.Render(" 󰓅  ACTION DECK"))
+		}
+		deckLines = append(deckLines, deckContentLines...)
 		rightBottom := currentRightBottomStyle.Render(strings.Join(deckLines, "\n"))
 
 		// Render dashboard layout side-by-side

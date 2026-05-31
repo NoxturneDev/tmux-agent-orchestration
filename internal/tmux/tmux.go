@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -180,6 +181,8 @@ func IsolatePane(paneID string) error {
 	return cmd.Run()
 }
 
+var ansiRegex = regexp.MustCompile(`\x1b\[[0-9;?]*[a-zA-Z~]`)
+
 // CapturePaneBuffer captures the last 20 lines of the target pane's terminal buffer
 func CapturePaneBuffer(paneID string) (string, error) {
 	if paneID == "" {
@@ -194,7 +197,21 @@ func CapturePaneBuffer(paneID string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("capture failed: %v", err)
 	}
-	return stdout.String(), nil
+
+	// 1. Strip all ANSI escape sequences using regex
+	stripped := ansiRegex.ReplaceAll(stdout.Bytes(), nil)
+
+	// 2. Clean remaining bytes (expand tabs to spaces, strip other control characters)
+	cleaned := make([]byte, 0, len(stripped))
+	for _, b := range stripped {
+		if (b >= 32 && b != 127) || b == 10 {
+			cleaned = append(cleaned, b)
+		} else if b == 9 {
+			// Replace Tab (9) with 4 spaces to prevent tab expansion wrapping bugs
+			cleaned = append(cleaned, ' ', ' ', ' ', ' ')
+		}
+	}
+	return string(cleaned), nil
 }
 
 // InjectPromptViaBuffer loads content to tmux clipboard via stdin, pastes it into the pane, and sends Enter
