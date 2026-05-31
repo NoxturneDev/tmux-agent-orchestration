@@ -452,7 +452,7 @@ func ListAgentPanes() ([]AgentPane, error) {
 
 		// Retrieve active goal objective from local active_plan.md
 		planPath := filepath.Join(path, ".agents", "plan", "active_plan.md")
-		activeGoal := extractActiveGoal(planPath)
+		activeGoal := ExtractActiveGoal(planPath)
 
 		panes = append(panes, AgentPane{
 			PaneID:     paneID,
@@ -510,8 +510,8 @@ func ListSubdirs(path string) ([]string, error) {
 	return dirs, nil
 }
 
-// extractActiveGoal scans active_plan.md for the first heading or non-empty line
-func extractActiveGoal(planPath string) string {
+// ExtractActiveGoal scans active_plan.md for the first heading or non-empty line
+func ExtractActiveGoal(planPath string) string {
 	info, err := os.Stat(planPath)
 	if err != nil || info.IsDir() {
 		return "[No active plan - Idle]"

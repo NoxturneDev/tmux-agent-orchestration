@@ -1281,13 +1281,14 @@ func (m Model) View() string {
 		if len(m.TreeItems) > 0 && m.SelectedTreeItem < len(m.TreeItems) {
 			item := m.TreeItems[m.SelectedTreeItem]
 			if !item.IsFolder {
-				goalText = item.Pane.ActiveGoal
+				planPath := filepath.Join(item.Pane.Path, ".agents", "plan", "active_plan.md")
+				goalText = tmux.ExtractActiveGoal(planPath)
 			} else {
 				goalText = "[Directory: " + filepath.Base(item.Path) + "]"
 			}
 		}
 
-		// 1. Render "ACTIVE PLAN" label with a premium background color
+		// 1. Render "ACTIVE PLAN" label with a premium background color, and beside it is the plan name (uncolored, original casing)
 		labelStyle := lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#1e1e2e")). // elegant dark charcoal text
 			Background(colorPurple).               // Indigo background
@@ -1295,10 +1296,7 @@ func (m Model) View() string {
 			PaddingRight(1).
 			Bold(true)
 
-		deckContentLines = append(deckContentLines, " "+labelStyle.Render("󰓎  ACTIVE PLAN"))
-
-		// 2. Render the active plan detail text on the line below without background color
-		deckContentLines = append(deckContentLines, "  "+normalStyle.Render(truncateStr(goalText, rightInnerWidth-6)))
+		deckContentLines = append(deckContentLines, " "+labelStyle.Render("󰓎  CURRENT CONTEXT")+"  "+normalStyle.Render(truncateStr(goalText, rightInnerWidth-22)))
 
 		// Fill in dynamic controls to align footer to panel limits
 		if maxDeckContentLines >= 4 {
