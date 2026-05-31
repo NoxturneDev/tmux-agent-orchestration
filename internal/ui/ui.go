@@ -158,6 +158,8 @@ type Model struct {
 
 	Macros        []prompt.Macro
 	SelectedMacro int
+	AddedContext  string // Added more context input form
+	MacroFocus    int    // 0 = select macro list, 1 = edit added context input
 
 	// Common fields
 	ActivePaneID string
@@ -328,6 +330,13 @@ func (m Model) spawnAgentCmd() tea.Cmd {
 		selectedTarget := tmux.SpawnTarget(m.SelectedTarget)
 		selectedMacro := m.Macros[m.SelectedMacro]
 		constructedPrompt := prompt.BuildPrompt(selectedMacro)
+		if m.AddedContext != "" {
+			if selectedMacro == prompt.NoMacro {
+				constructedPrompt = m.AddedContext
+			} else {
+				constructedPrompt = fmt.Sprintf("%s %s", constructedPrompt, m.AddedContext)
+			}
+		}
 
 		var targetWindow string
 		var splitDir string
@@ -366,6 +375,13 @@ func (m Model) getPreviewCommand() string {
 	selectedMacro := m.Macros[m.SelectedMacro]
 
 	constructedPrompt := prompt.BuildPrompt(selectedMacro)
+	if m.AddedContext != "" {
+		if selectedMacro == prompt.NoMacro {
+			constructedPrompt = m.AddedContext
+		} else {
+			constructedPrompt = fmt.Sprintf("%s %s", constructedPrompt, m.AddedContext)
+		}
+	}
 	innerCmd, err := tmux.GetSpawnCommand(selectedAgent, constructedPrompt)
 	if err != nil {
 		return "Error building command preview"
@@ -536,6 +552,32 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.ClearScreen
 
 	case tea.KeyMsg:
+		if m.ActiveTab == TabSpawner && m.SpawnerState == SpawnerStateMacro && m.MacroFocus == 1 {
+			switch msg.String() {
+			case "escape":
+				m.MacroFocus = 0
+				return m, nil
+			case "enter":
+				m.SpawnerState = SpawnerStateExecuting
+				return m, m.spawnAgentCmd()
+			case "up", "ctrl+k":
+				m.MacroFocus = 0
+				return m, nil
+			case "backspace", "ctrl+h":
+				if len(m.AddedContext) > 0 {
+					m.AddedContext = m.AddedContext[:len(m.AddedContext)-1]
+				}
+				return m, nil
+			default:
+				if len(msg.Runes) > 0 {
+					m.AddedContext += string(msg.Runes)
+				} else if len(msg.String()) == 1 {
+					m.AddedContext += msg.String()
+				}
+				return m, nil
+			}
+		}
+
 		switch msg.String() {
 		case "q", "ctrl+c":
 			return m, tea.Quit
@@ -599,7 +641,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.SelectedSession--
 					}
 				case SpawnerStateMacro:
-					if m.SelectedMacro > 0 {
+					if m.MacroFocus == 1 {
+						m.MacroFocus = 0
+					} else if m.SelectedMacro > 0 {
 						m.SelectedMacro--
 					}
 				}
@@ -646,8 +690,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.SelectedSession++
 					}
 				case SpawnerStateMacro:
-					if m.SelectedMacro < len(m.Macros)-1 {
-						m.SelectedMacro++
+					if m.MacroFocus == 0 {
+						if m.SelectedMacro < len(m.Macros)-1 {
+							m.SelectedMacro++
+						} else {
+							m.MacroFocus = 1
+						}
 					}
 				}
 			}
@@ -1544,6 +1592,22 @@ func (m Model) View() string {
 				}
 			}
 
+			leftLines = append(leftLines, "")
+			leftLines = append(leftLines, headerStyle.Render(" 📝  ADDED MORE CONTEXT"))
+			var inputDisplay string
+			if m.AddedContext == "" {
+				inputDisplay = " [ Type extra context here... ]"
+			} else {
+				inputDisplay = " " + m.AddedContext
+			}
+			inputDisplay = truncateStr(inputDisplay, leftInnerWidth-4)
+
+			if m.MacroFocus == 1 {
+				leftLines = append(leftLines, lipgloss.NewStyle().Foreground(colorTeal).Bold(true).Render(inputDisplay+"█"))
+			} else {
+				leftLines = append(leftLines, normalStyle.Render(inputDisplay))
+			}
+
 		case SpawnerStateExecuting:
 			leftLines = append(leftLines, lipgloss.NewStyle().Foreground(colorSuccess).Bold(true).Render("   AGENT SPAWNING...")+"\n")
 			leftLines = append(leftLines, " "+fmt.Sprintf("Agent:  %s", normalStyle.Render(m.Agents[m.SelectedAgent])))
@@ -1575,6 +1639,9 @@ func (m Model) View() string {
 			}
 			macroNames := []string{"Just Spawn (No Macro)", "Implement", "Cook It", "Wrap It Up", "Recon"}
 			leftLines = append(leftLines, " "+fmt.Sprintf("Macro:  %s", normalStyle.Render(macroNames[m.SelectedMacro])))
+			if m.AddedContext != "" {
+				leftLines = append(leftLines, " "+fmt.Sprintf("Context:%s", normalStyle.Render(truncateStr(m.AddedContext, leftInnerWidth-9))))
+			}
 			leftLines = append(leftLines, " "+fmt.Sprintf("Pane:   %s", selectedItemStyle.Render(m.ActivePaneID)))
 		}
 
