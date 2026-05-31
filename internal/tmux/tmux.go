@@ -79,6 +79,9 @@ func SpawnAgent(agentName, prompt, dir string, target SpawnTarget, targetWindow 
 
 	if target == TargetWindow {
 		tmuxSubCmd = "new-window"
+		if targetWindow != "" {
+			args = append(args, "-t", targetWindow+":")
+		}
 	} else {
 		tmuxSubCmd = "split-window"
 		if splitDir == "-v" {
@@ -114,7 +117,18 @@ func SpawnAgent(agentName, prompt, dir string, target SpawnTarget, targetWindow 
 		return "", fmt.Errorf("tmux did not return a pane ID")
 	}
 
+	// Tag the pane natively in tmux as an AI agent pane
+	_ = TagAgentPane(paneID, agentName)
+
 	return paneID, nil
+}
+
+// TagAgentPane tags a tmux pane with custom options to identify it as an AI agent
+func TagAgentPane(paneID, agentName string) error {
+	cmd1 := exec.Command("tmux", "set-option", "-p", "-t", paneID, "@is_agent", "1")
+	_ = cmd1.Run()
+	cmd2 := exec.Command("tmux", "set-option", "-p", "-t", paneID, "@agent_name", agentName)
+	return cmd2.Run()
 }
 
 // ListWindows returns all active tmux windows in the format "session_name:window_index (window_name)"
@@ -243,14 +257,51 @@ func getPPIDAndComm(pid int) (int, string, error) {
 	return ppid, comm, nil
 }
 
-// buildPidTree scans /proc to construct parent-child PID mappings
-func buildPidTree() (map[int][]int, map[int]string) {
+// buildPidTree scans host processes via tmux run-shell ps (or falls back to /proc) to construct parent-child PID mappings and cmdline lists
+func buildPidTree() (map[int][]int, map[int]string, map[int]string) {
 	parentToChildren := make(map[int][]int)
 	pidToComm := make(map[int]string)
+	pidToArgs := make(map[int]string)
 
+	// 1. Try host-level ps via tmux run-shell (resolves container/sandbox namespace isolation)
+	cmd := exec.Command("tmux", "run-shell", "ps -eo pid,ppid,comm,args")
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+	if err := cmd.Run(); err == nil {
+		lines := strings.Split(stdout.String(), "\n")
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if line == "" {
+				continue
+			}
+			parts := strings.Fields(line)
+			if len(parts) < 3 {
+				continue
+			}
+			pid, err1 := strconv.Atoi(parts[0])
+			ppid, err2 := strconv.Atoi(parts[1])
+			if err1 != nil || err2 != nil {
+				continue
+			}
+			comm := parts[2]
+			var args string
+			idx := strings.Index(line, comm)
+			if idx != -1 {
+				args = strings.TrimSpace(line[idx+len(comm):])
+			}
+			parentToChildren[ppid] = append(parentToChildren[ppid], pid)
+			pidToComm[pid] = comm
+			pidToArgs[pid] = args
+		}
+		if len(pidToComm) > 0 {
+			return parentToChildren, pidToComm, pidToArgs
+		}
+	}
+
+	// 2. Fallback: local /proc scanning
 	files, err := os.ReadDir("/proc")
 	if err != nil {
-		return parentToChildren, pidToComm
+		return parentToChildren, pidToComm, pidToArgs
 	}
 
 	for _, f := range files {
@@ -266,14 +317,20 @@ func buildPidTree() (map[int][]int, map[int]string) {
 		if err == nil {
 			parentToChildren[ppid] = append(parentToChildren[ppid], pid)
 			pidToComm[pid] = comm
+			cmdlineBytes, err := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pid))
+			if err == nil {
+				cmdline := string(cmdlineBytes)
+				cmdline = strings.ReplaceAll(cmdline, "\x00", " ")
+				pidToArgs[pid] = cmdline
+			}
 		}
 	}
 
-	return parentToChildren, pidToComm
+	return parentToChildren, pidToComm, pidToArgs
 }
 
 // isAgentProcess checks recursively if a pane PID or any descendant process is an AI agent
-func isAgentProcess(panePID int, parentToChildren map[int][]int, pidToComm map[int]string) (bool, string) {
+func isAgentProcess(panePID int, parentToChildren map[int][]int, pidToComm map[int]string, pidToArgs map[int]string) (bool, string) {
 	queue := []int{panePID}
 	visited := make(map[int]bool)
 
@@ -287,26 +344,21 @@ func isAgentProcess(panePID int, parentToChildren map[int][]int, pidToComm map[i
 		visited[curr] = true
 
 		comm := pidToComm[curr]
+		args := pidToArgs[curr]
 		if strings.Contains(comm, "agy") || strings.Contains(comm, "gemini") || strings.Contains(comm, "claude") {
 			return true, comm
 		}
-
-		cmdlineBytes, err := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", curr))
-		if err == nil {
-			cmdline := string(cmdlineBytes)
-			cmdline = strings.ReplaceAll(cmdline, "\x00", " ")
-			if strings.Contains(cmdline, "agy") || strings.Contains(cmdline, "gemini") || strings.Contains(cmdline, "claude") {
-				if strings.Contains(cmdline, "agy") {
-					return true, "agy"
-				}
-				if strings.Contains(cmdline, "gemini") {
-					return true, "gemini"
-				}
-				if strings.Contains(cmdline, "claude") {
-					return true, "claude"
-				}
-				return true, comm
+		if strings.Contains(args, "agy") || strings.Contains(args, "gemini") || strings.Contains(args, "claude") {
+			if strings.Contains(args, "agy") {
+				return true, "agy"
 			}
+			if strings.Contains(args, "gemini") {
+				return true, "gemini"
+			}
+			if strings.Contains(args, "claude") {
+				return true, "claude"
+			}
+			return true, comm
 		}
 
 		if children, ok := parentToChildren[curr]; ok {
@@ -319,7 +371,7 @@ func isAgentProcess(panePID int, parentToChildren map[int][]int, pidToComm map[i
 
 // ListAgentPanes queries host tmux for all running AI agent panes and silent-extracts their plans
 func ListAgentPanes() ([]AgentPane, error) {
-	cmd := exec.Command("tmux", "list-panes", "-a", "-F", "#{pane_id}|#{session_name}|#{window_id}|#{pane_current_command}|#{pane_current_path}|#{pane_pid}")
+	cmd := exec.Command("tmux", "list-panes", "-a", "-F", "#{pane_id}|#{session_name}|#{window_id}|#{pane_current_command}|#{pane_current_path}|#{pane_pid}|#{@is_agent}|#{@agent_name}")
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
 	err := cmd.Run()
@@ -331,7 +383,7 @@ func ListAgentPanes() ([]AgentPane, error) {
 	var panes []AgentPane
 
 	// Build the PID tree once for this list scan
-	parentToChildren, pidToComm := buildPidTree()
+	parentToChildren, pidToComm, pidToArgs := buildPidTree()
 
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
@@ -351,18 +403,26 @@ func ListAgentPanes() ([]AgentPane, error) {
 		isAgent := false
 		displayCommand := command
 
-		// If pane_pid is available, traverse process tree to detect background agent running (e.g. node running gemini)
-		if len(parts) >= 6 {
+		// 1. Check native tmux tagging first
+		if len(parts) >= 8 && parts[6] == "1" {
+			isAgent = true
+			if parts[7] != "" {
+				displayCommand = parts[7]
+			}
+		}
+
+		// 2. Process tree traversal if not natively tagged
+		if !isAgent && len(parts) >= 6 {
 			panePID, err := strconv.Atoi(parts[5])
 			if err == nil && panePID > 0 {
-				if ok, matchedCmd := isAgentProcess(panePID, parentToChildren, pidToComm); ok {
+				if ok, matchedCmd := isAgentProcess(panePID, parentToChildren, pidToComm, pidToArgs); ok {
 					isAgent = true
 					displayCommand = matchedCmd
 				}
 			}
 		}
 
-		// Fallback check
+		// 3. Fallback check (command name matching)
 		if !isAgent {
 			if strings.Contains(command, "agy") || strings.Contains(command, "gemini") || strings.Contains(command, "claude") {
 				isAgent = true
@@ -487,5 +547,26 @@ func FindAllProjectSubdirs() ([]string, error) {
 	}
 	sort.Strings(dirs)
 	return dirs, nil
+}
+
+// ListSessions returns all active tmux sessions
+func ListSessions() ([]string, error) {
+	cmd := exec.Command("tmux", "list-sessions", "-F", "#{session_name}")
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+	err := cmd.Run()
+	if err != nil {
+		return nil, fmt.Errorf("failed to query tmux sessions: %v", err)
+	}
+
+	lines := strings.Split(stdout.String(), "\n")
+	var sessions []string
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			sessions = append(sessions, line)
+		}
+	}
+	return sessions, nil
 }
 
