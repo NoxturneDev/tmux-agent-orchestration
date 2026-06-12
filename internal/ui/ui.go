@@ -82,6 +82,7 @@ type SpawnerState int
 const (
 	SpawnerStateAgent SpawnerState = iota
 	SpawnerStateDir
+	SpawnerStatePlan
 	SpawnerStateTarget
 	SpawnerStateWindow
 	SpawnerStateSplitDirection
@@ -207,6 +208,9 @@ type Model struct {
 	SelectedDir    int
 	CurrentDirPath string
 
+	Plans        []string
+	SelectedPlan int
+
 	Targets        []string
 	SelectedTarget int
 
@@ -268,6 +272,8 @@ func InitialModel() Model {
 		CurrentDirPath:         initialDir,
 		Dirs:                   nil,
 		SelectedDir:            0,
+		Plans:                  nil,
+		SelectedPlan:           0,
 		Targets:                targets,
 		SelectedTarget:         0,
 		Windows:                nil,
@@ -393,6 +399,21 @@ func (m *Model) populateDirList() {
 	m.Dirs = list
 }
 
+// populatePlanList scans the selected directory's .agents/plan/active folder for available plans
+func (m *Model) populatePlanList() {
+	m.Plans = []string{"[ Default / active_plan.md ]"}
+
+	activePlansPath := filepath.Join(m.CurrentDirPath, ".agents", "plan", "active")
+	files, err := os.ReadDir(activePlansPath)
+	if err == nil {
+		for _, f := range files {
+			if !f.IsDir() && strings.HasSuffix(f.Name(), ".md") {
+				m.Plans = append(m.Plans, f.Name())
+			}
+		}
+	}
+}
+
 // Msg type sent back when spawning completes
 type spawnResultMsg struct {
 	paneID string
@@ -436,7 +457,12 @@ func (m Model) spawnAgentCmd() tea.Cmd {
 			}
 		}
 
-		paneID, err := tmux.SpawnAgent(selectedAgent, constructedPrompt, selectedDir, selectedTarget, targetWindow, splitDir)
+		var selectedPlan string
+		if m.SelectedPlan > 0 && m.SelectedPlan < len(m.Plans) {
+			selectedPlan = m.Plans[m.SelectedPlan]
+		}
+
+		paneID, err := tmux.SpawnAgent(selectedAgent, selectedPlan, constructedPrompt, selectedDir, selectedTarget, targetWindow, splitDir)
 		return spawnResultMsg{
 			paneID: paneID,
 			err:    err,
@@ -459,7 +485,13 @@ func (m Model) getPreviewCommand() string {
 			constructedPrompt = fmt.Sprintf("%s %s", constructedPrompt, m.AddedContext)
 		}
 	}
-	innerCmd, err := tmux.GetSpawnCommand(selectedAgent, constructedPrompt)
+
+	var selectedPlan string
+	if m.SelectedPlan > 0 && m.SelectedPlan < len(m.Plans) {
+		selectedPlan = m.Plans[m.SelectedPlan]
+	}
+
+	innerCmd, err := tmux.GetSpawnCommand(selectedAgent, selectedPlan, constructedPrompt)
 	if err != nil {
 		return "Error building command preview"
 	}
@@ -776,7 +808,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.CurrentDirPath = filepath.Clean(absoluteDir)
 			m.populateDirList()
 			m.SelectedDir = 0
-			m.SpawnerState = SpawnerStateTarget
+			m.populatePlanList()
+			if len(m.Plans) > 1 {
+				m.SelectedPlan = 0
+				m.SpawnerState = SpawnerStatePlan
+			} else {
+				m.SelectedPlan = 0
+				m.SpawnerState = SpawnerStateTarget
+			}
 		}
 		return m, tea.ClearScreen
 
@@ -855,6 +894,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if m.SelectedDir > 0 {
 						m.SelectedDir--
 					}
+				case SpawnerStatePlan:
+					if m.SelectedPlan > 0 {
+						m.SelectedPlan--
+					}
 				case SpawnerStateTarget:
 					if m.SelectedTarget > 0 {
 						m.SelectedTarget--
@@ -903,6 +946,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				case SpawnerStateDir:
 					if m.SelectedDir < len(m.Dirs)-1 {
 						m.SelectedDir++
+					}
+				case SpawnerStatePlan:
+					if m.SelectedPlan < len(m.Plans)-1 {
+						m.SelectedPlan++
 					}
 				case SpawnerStateTarget:
 					if m.SelectedTarget < len(m.Targets)-1 {
@@ -961,8 +1008,16 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				switch m.SpawnerState {
 				case SpawnerStateDir:
 					m.SpawnerState = SpawnerStateAgent
-				case SpawnerStateTarget:
+				case SpawnerStatePlan:
 					m.SpawnerState = SpawnerStateDir
+				case SpawnerStateTarget:
+					m.populatePlanList()
+					if len(m.Plans) > 1 {
+						m.SelectedPlan = 0
+						m.SpawnerState = SpawnerStatePlan
+					} else {
+						m.SpawnerState = SpawnerStateDir
+					}
 				case SpawnerStateWindow:
 					m.SpawnerState = SpawnerStateTarget
 				case SpawnerStateSplitDirection:
@@ -1023,7 +1078,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				case SpawnerStateDir:
 					selectedItem := m.Dirs[m.SelectedDir]
 					if selectedItem == "[ Select This Directory ]" {
-						m.SpawnerState = SpawnerStateTarget
+						m.populatePlanList()
+						if len(m.Plans) > 1 {
+							m.SelectedPlan = 0
+							m.SpawnerState = SpawnerStatePlan
+						} else {
+							m.SelectedPlan = 0
+							m.SpawnerState = SpawnerStateTarget
+						}
 					} else if selectedItem == ".." {
 						m.CurrentDirPath = filepath.Dir(filepath.Clean(m.CurrentDirPath))
 						m.populateDirList()
@@ -1033,6 +1095,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.populateDirList()
 						m.SelectedDir = 0
 					}
+
+				case SpawnerStatePlan:
+					m.SpawnerState = SpawnerStateTarget
 
 				case SpawnerStateTarget:
 					if m.Targets[m.SelectedTarget] == "Pane Split" {
@@ -1551,13 +1616,25 @@ func (m *Model) View() string {
 
 		var deckContentLines []string
 		goalText := "[No active agent selected]"
+		planName := ""
+		daemonStatus := "INACTIVE"
 		if len(m.TreeItems) > 0 && m.SelectedTreeItem < len(m.TreeItems) {
 			item := m.TreeItems[m.SelectedTreeItem]
 			if !item.IsFolder {
-				planPath := filepath.Join(item.Pane.Path, ".agents", "plan", "active_plan.md")
-				goalText = tmux.ExtractActiveGoal(planPath)
+				goalText = item.Pane.ActiveGoal
+				planName = item.Pane.PlanName
 			} else {
 				goalText = "[Directory: " + filepath.Base(item.Path) + "]"
+			}
+
+			var checkDir string
+			if !item.IsFolder {
+				checkDir = item.Pane.Path
+			} else {
+				checkDir = item.Path
+			}
+			if checkDir != "" && tmux.IsLockDaemonAlive(checkDir) {
+				daemonStatus = "ALIVE"
 			}
 		}
 
@@ -1569,7 +1646,13 @@ func (m *Model) View() string {
 			PaddingRight(1).
 			Bold(true)
 
-		deckContentLines = append(deckContentLines, " "+labelStyle.Render("󰓎  CURRENT CONTEXT")+"  "+normalStyle.Render(truncateStr(goalText, rightInnerWidth-22)))
+		var contextLabel string
+		if planName != "" {
+			contextLabel = fmt.Sprintf("󰓎  CURRENT CONTEXT (%s)", planName)
+		} else {
+			contextLabel = "󰓎  CURRENT CONTEXT"
+		}
+		deckContentLines = append(deckContentLines, " "+labelStyle.Render(contextLabel)+"  "+normalStyle.Render(truncateStr(goalText, rightInnerWidth-len(contextLabel)-6)))
 
 		// Fill in dynamic controls to align footer to panel limits
 		if maxDeckContentLines >= 4 {
@@ -1601,7 +1684,12 @@ func (m *Model) View() string {
 
 		var deckLines []string
 		if agentClient != "" {
-			deckLines = append(deckLines, headerStyle.Render(" 󰓅  ACTION DECK")+"  "+lipgloss.NewStyle().Foreground(colorTeal).Bold(true).Render("("+agentClient+")"))
+			statusColor := colorMuted
+			if daemonStatus == "ALIVE" {
+				statusColor = colorTeal
+			}
+			daemonText := lipgloss.NewStyle().Foreground(statusColor).Bold(true).Render("Daemon: " + daemonStatus)
+			deckLines = append(deckLines, headerStyle.Render(" 󰓅  ACTION DECK")+"  "+lipgloss.NewStyle().Foreground(colorTeal).Bold(true).Render("("+agentClient+")")+"  •  "+daemonText)
 		} else {
 			deckLines = append(deckLines, headerStyle.Render(" 󰓅  ACTION DECK"))
 		}
@@ -1652,6 +1740,25 @@ func (m *Model) View() string {
 					leftLines = append(leftLines, selectedItemStyle.Render(fmt.Sprintf(" ❯ %s  %s", icon, truncateStr(displayDir, leftInnerWidth-6))))
 				} else {
 					leftLines = append(leftLines, normalItemStyle.Render(fmt.Sprintf("   %s  %s", icon, truncateStr(displayDir, leftInnerWidth-6))))
+				}
+			}
+
+		case SpawnerStatePlan:
+			leftLines = append(leftLines, " "+normalStyle.Render(fmt.Sprintf("Agent: %s", selectedItemStyle.Render(m.Agents[m.SelectedAgent]))))
+			leftLines = append(leftLines, " "+normalStyle.Render(fmt.Sprintf("Dir:   %s\n", selectedItemStyle.Render(truncateStr(formatDirPath(m.CurrentDirPath), leftInnerWidth-8)))))
+			leftLines = append(leftLines, headerStyle.Render(" 󰓎  SELECT PLAN FILE")+"\n")
+
+			for i, plan := range m.Plans {
+				var icon string
+				if i == 0 {
+					icon = "󰓎 "
+				} else {
+					icon = " "
+				}
+				if i == m.SelectedPlan {
+					leftLines = append(leftLines, selectedItemStyle.Render(fmt.Sprintf(" ❯ %s  %s", icon, plan)))
+				} else {
+					leftLines = append(leftLines, normalItemStyle.Render(fmt.Sprintf("   %s  %s", icon, plan)))
 				}
 			}
 

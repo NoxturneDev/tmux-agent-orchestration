@@ -43,6 +43,7 @@ type AgentPane struct {
 	Path       string // e.g., "/home/user/workspace/ziad-laravel"
 	ActiveGoal string // Extracted objective from active_plan.md
 	WindowID   string // e.g., "2" (cleansed from tmux @2 representation)
+	PlanName   string // e.g., "epic_auth.md"
 }
 
 // EscapeShellSingleQuote escapes single quotes for use inside a single-quoted shell string.
@@ -51,7 +52,7 @@ func EscapeShellSingleQuote(s string) string {
 }
 
 // GetSpawnCommand returns the compiled shell execution command about to be run, for spawner preview
-func GetSpawnCommand(agentName, prompt string) (string, error) {
+func GetSpawnCommand(agentName, planName, prompt string) (string, error) {
 	var targetCmd string
 	for _, agent := range Agents {
 		if agent.Name == agentName {
@@ -64,12 +65,29 @@ func GetSpawnCommand(agentName, prompt string) (string, error) {
 	}
 
 	escapedPrompt := EscapeShellSingleQuote(prompt)
+	if planName != "" {
+		return fmt.Sprintf("%s --plan=%s -i '%s'", targetCmd, planName, escapedPrompt), nil
+	}
 	return fmt.Sprintf("%s -i '%s'", targetCmd, escapedPrompt), nil
 }
 
 // SpawnAgent splits the window or creates a new window and runs the agent with the given prompt in the specified dir
-func SpawnAgent(agentName, prompt, dir string, target SpawnTarget, targetWindow string, splitDir string) (string, error) {
-	fullShellCmd, err := GetSpawnCommand(agentName, prompt)
+func SpawnAgent(agentName, planName, prompt, dir string, target SpawnTarget, targetWindow string, splitDir string) (string, error) {
+	// Lock validation: Check if another agent is already running in an overlapping path on the same plan
+	panes, err := ListAgentPanes()
+	if err == nil {
+		for _, p := range panes {
+			if PathsOverlap(p.Path, dir) && p.PlanName == planName {
+				planDisplay := planName
+				if planDisplay == "" {
+					planDisplay = "active_plan.md (default)"
+				}
+				return "", fmt.Errorf("lock collision: an active agent is already running in this workspace on plan '%s' (pane %s)", planDisplay, p.PaneID)
+			}
+		}
+	}
+
+	fullShellCmd, err := GetSpawnCommand(agentName, planName, prompt)
 	if err != nil {
 		return "", err
 	}
@@ -386,6 +404,60 @@ func isAgentProcess(panePID int, parentToChildren map[int][]int, pidToComm map[i
 	return false, ""
 }
 
+// findPlanNameForPane walks the process tree of a pane and returns the plan name if `--plan=` argument is found
+func findPlanNameForPane(panePID int, parentToChildren map[int][]int, pidToArgs map[int]string) string {
+	queue := []int{panePID}
+	visited := make(map[int]bool)
+
+	for len(queue) > 0 {
+		curr := queue[0]
+		queue = queue[1:]
+
+		if visited[curr] {
+			continue
+		}
+		visited[curr] = true
+
+		args := pidToArgs[curr]
+		if idx := strings.Index(args, "--plan="); idx != -1 {
+			remaining := args[idx+len("--plan="):]
+			fields := strings.Fields(remaining)
+			if len(fields) > 0 {
+				return fields[0]
+			}
+		}
+
+		if children, ok := parentToChildren[curr]; ok {
+			queue = append(queue, children...)
+		}
+	}
+	return ""
+}
+
+// PathsOverlap returns true if path1 and path2 are identical or if one is a subdirectory of the other
+func PathsOverlap(path1, path2 string) bool {
+	p1 := filepath.Clean(path1)
+	p2 := filepath.Clean(path2)
+	if p1 == p2 {
+		return true
+	}
+	if strings.HasPrefix(p2, p1+string(filepath.Separator)) {
+		return true
+	}
+	if strings.HasPrefix(p1, p2+string(filepath.Separator)) {
+		return true
+	}
+	return false
+}
+
+// IsLockDaemonAlive queries lock daemon health status for a given directory
+func IsLockDaemonAlive(dir string) bool {
+	cmd := exec.Command("/home/noxturne/agents/antigravity-cli", "ping")
+	cmd.Dir = dir
+	err := cmd.Run()
+	return err == nil
+}
+
 // ListAgentPanes queries host tmux for all running AI agent panes and silent-extracts their plans
 func ListAgentPanes() ([]AgentPane, error) {
 	cmd := exec.Command("tmux", "list-panes", "-a", "-F", "#{pane_id}|#{session_name}|#{window_id}|#{pane_current_command}|#{pane_current_path}|#{pane_pid}|#{@is_agent}|#{@agent_name}")
@@ -428,14 +500,18 @@ func ListAgentPanes() ([]AgentPane, error) {
 			}
 		}
 
-		// 2. Process tree traversal if not natively tagged
-		if !isAgent && len(parts) >= 6 {
+		var planName string
+		if len(parts) >= 6 {
 			panePID, err := strconv.Atoi(parts[5])
 			if err == nil && panePID > 0 {
-				if ok, matchedCmd := isAgentProcess(panePID, parentToChildren, pidToComm, pidToArgs); ok {
-					isAgent = true
-					displayCommand = matchedCmd
+				// 2. Process tree traversal if not natively tagged (or to get plan name)
+				if !isAgent {
+					if ok, matchedCmd := isAgentProcess(panePID, parentToChildren, pidToComm, pidToArgs); ok {
+						isAgent = true
+						displayCommand = matchedCmd
+					}
 				}
+				planName = findPlanNameForPane(panePID, parentToChildren, pidToArgs)
 			}
 		}
 
@@ -450,8 +526,13 @@ func ListAgentPanes() ([]AgentPane, error) {
 			continue
 		}
 
-		// Retrieve active goal objective from local active_plan.md
-		planPath := filepath.Join(path, ".agents", "plan", "active_plan.md")
+		// Retrieve active goal objective from the plan file
+		var planPath string
+		if planName != "" {
+			planPath = filepath.Join(path, ".agents", "plan", "active", planName)
+		} else {
+			planPath = filepath.Join(path, ".agents", "plan", "active_plan.md")
+		}
 		activeGoal := ExtractActiveGoal(planPath)
 
 		panes = append(panes, AgentPane{
@@ -461,6 +542,7 @@ func ListAgentPanes() ([]AgentPane, error) {
 			Path:       path,
 			ActiveGoal: activeGoal,
 			WindowID:   windowID,
+			PlanName:   planName,
 		})
 	}
 
