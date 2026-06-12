@@ -83,6 +83,7 @@ const (
 	SpawnerStateAgent SpawnerState = iota
 	SpawnerStateDir
 	SpawnerStatePlan
+	SpawnerStateCreatePlan
 	SpawnerStateTarget
 	SpawnerStateWindow
 	SpawnerStateSplitDirection
@@ -210,6 +211,7 @@ type Model struct {
 
 	Plans        []string
 	SelectedPlan int
+	NewPlanName  string
 
 	Targets        []string
 	SelectedTarget int
@@ -274,6 +276,7 @@ func InitialModel() Model {
 		SelectedDir:            0,
 		Plans:                  nil,
 		SelectedPlan:           0,
+		NewPlanName:            "",
 		Targets:                targets,
 		SelectedTarget:         0,
 		Windows:                nil,
@@ -401,7 +404,7 @@ func (m *Model) populateDirList() {
 
 // populatePlanList scans the selected directory's .agents/plan/active folder for available plans
 func (m *Model) populatePlanList() {
-	m.Plans = []string{"[ Default / active_plan.md ]"}
+	m.Plans = []string{"[ Default / active_plan.md ]", "[ Create New Plan... ]"}
 
 	activePlansPath := filepath.Join(m.CurrentDirPath, ".agents", "plan", "active")
 	files, err := os.ReadDir(activePlansPath)
@@ -846,6 +849,67 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+		if m.ActiveTab == TabSpawner && m.SpawnerState == SpawnerStateCreatePlan {
+			switch msg.String() {
+			case "escape":
+				m.SpawnerState = SpawnerStatePlan
+				return m, nil
+			case "enter":
+				planFile := strings.TrimSpace(m.NewPlanName)
+				if planFile == "" {
+					m.ErrorMsg = "Plan file name cannot be empty."
+					m.IsError = true
+					return m, nil
+				}
+				planFile = strings.ReplaceAll(planFile, " ", "_")
+				reg := regexp.MustCompile(`[^a-zA-Z0-9_\-\.]`)
+				planFile = reg.ReplaceAllString(planFile, "")
+				if !strings.HasSuffix(planFile, ".md") {
+					planFile += ".md"
+				}
+
+				activePlansPath := filepath.Join(m.CurrentDirPath, ".agents", "plan", "active")
+				err := os.MkdirAll(activePlansPath, 0755)
+				if err != nil {
+					m.ErrorMsg = fmt.Sprintf("Failed to create plan directory: %v", err)
+					m.IsError = true
+					return m, nil
+				}
+				planPath := filepath.Join(activePlansPath, planFile)
+				headerText := fmt.Sprintf("# Plan: %s\n\n## Technical Goal\n- \n\n## Key Design Decisions\n- \n\n## Technical Tasks (Execution Order)\n- [ ] Task 1\n", strings.TrimSuffix(planFile, ".md"))
+				err = os.WriteFile(planPath, []byte(headerText), 0644)
+				if err != nil {
+					m.ErrorMsg = fmt.Sprintf("Failed to write plan file: %v", err)
+					m.IsError = true
+					return m, nil
+				}
+
+				m.populatePlanList()
+				for idx, plan := range m.Plans {
+					if plan == planFile {
+						m.SelectedPlan = idx
+						break
+					}
+				}
+				m.SpawnerState = SpawnerStateTarget
+				return m, nil
+
+			case "backspace", "ctrl+h":
+				if len(m.NewPlanName) > 0 {
+					m.NewPlanName = m.NewPlanName[:len(m.NewPlanName)-1]
+				}
+				return m, nil
+
+			default:
+				if len(msg.Runes) > 0 {
+					m.NewPlanName += string(msg.Runes)
+				} else if len(msg.String()) == 1 {
+					m.NewPlanName += msg.String()
+				}
+				return m, nil
+			}
+		}
+
 		switch msg.String() {
 		case "q", "ctrl+c":
 			_ = m.TransitionStream("")
@@ -1097,7 +1161,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 
 				case SpawnerStatePlan:
-					m.SpawnerState = SpawnerStateTarget
+					if m.Plans[m.SelectedPlan] == "[ Create New Plan... ]" {
+						m.NewPlanName = ""
+						m.SpawnerState = SpawnerStateCreatePlan
+					} else {
+						m.SpawnerState = SpawnerStateTarget
+					}
 
 				case SpawnerStateTarget:
 					if m.Targets[m.SelectedTarget] == "Pane Split" {
@@ -1761,6 +1830,29 @@ func (m *Model) View() string {
 					leftLines = append(leftLines, normalItemStyle.Render(fmt.Sprintf("   %s  %s", icon, plan)))
 				}
 			}
+
+		case SpawnerStateCreatePlan:
+			leftLines = append(leftLines, " "+normalStyle.Render(fmt.Sprintf("Agent: %s", selectedItemStyle.Render(m.Agents[m.SelectedAgent]))))
+			leftLines = append(leftLines, " "+normalStyle.Render(fmt.Sprintf("Dir:   %s\n", selectedItemStyle.Render(truncateStr(formatDirPath(m.CurrentDirPath), leftInnerWidth-8)))))
+			leftLines = append(leftLines, headerStyle.Render(" 󰓎  CREATE CUSTOM PLAN FILE")+"\n")
+
+			inputStyle := lipgloss.NewStyle().
+				Foreground(colorTeal).
+				Background(colorDarkGray).
+				PaddingLeft(1).
+				PaddingRight(1).
+				Bold(true)
+
+			cursorStyle := lipgloss.NewStyle().Foreground(colorPink).Bold(true).Render("█")
+
+			inputDisplay := m.NewPlanName
+			if inputDisplay == "" {
+				inputDisplay = lipgloss.NewStyle().Foreground(colorMuted).Render("(type plan name, e.g. refactor_api)")
+			}
+
+			leftLines = append(leftLines, "  Plan File Name:")
+			leftLines = append(leftLines, "  "+inputStyle.Render(inputDisplay+cursorStyle)+".md\n")
+			leftLines = append(leftLines, "  "+lipgloss.NewStyle().Foreground(colorMuted).Render("esc: cancel  •  enter: create plan file"))
 
 		case SpawnerStateTarget:
 			leftLines = append(leftLines, " "+normalStyle.Render(fmt.Sprintf("Agent: %s", selectedItemStyle.Render(m.Agents[m.SelectedAgent]))))
