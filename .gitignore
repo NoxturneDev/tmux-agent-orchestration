@@ -1,5 +1,6 @@
 # Binaries
 tmux-ai-operator
+tmux-ai-orchestrator
 
 # Workspace state tracking
 .agents/

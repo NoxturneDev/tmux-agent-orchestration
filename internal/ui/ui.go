@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,11 +18,54 @@ import (
 	"github.com/noxturne/tmux-ai-orchestrator/internal/tmux"
 )
 
-var cursorMovementRegex = regexp.MustCompile(`\x1b\[[0-9;?]*[A-LN-Za-ln-z]`)
+var screenClearRegex = regexp.MustCompile(`\x1b\[([0-9;?]*[JH])`)
+var nonColorAnsiRegex = regexp.MustCompile(`\x1b\[[0-9;?]*[A-Za-ln-z~]`)
+var vt100EscapeRegex = regexp.MustCompile(`\x1b[^[]`)
 
 func cleanAnsiAndTabs(s string) string {
 	s = strings.ReplaceAll(s, "\t", "    ")
-	return cursorMovementRegex.ReplaceAllString(s, "")
+
+	// 1. Slice stream at the last screen clear or cursor home command to render only the active frame
+	matches := screenClearRegex.FindAllStringIndex(s, -1)
+	if len(matches) > 0 {
+		lastMatchEnd := matches[len(matches)-1][1]
+		s = s[lastMatchEnd:]
+	}
+
+	// 2. Process carriage returns and backspaces line-by-line
+	lines := strings.Split(s, "\n")
+	for i, line := range lines {
+		if strings.Contains(line, "\r") {
+			parts := strings.Split(line, "\r")
+			for j := len(parts) - 1; j >= 0; j-- {
+				if parts[j] != "" || j == 0 {
+					line = parts[j]
+					break
+				}
+			}
+		}
+
+		for {
+			idx := strings.Index(line, "\b")
+			if idx == -1 {
+				break
+			}
+			if idx > 0 {
+				line = line[:idx-1] + line[idx+1:]
+			} else {
+				line = line[idx+1:]
+			}
+		}
+
+		lines[i] = line
+	}
+	s = strings.Join(lines, "\n")
+
+	// 3. Strip non-color ANSI escape sequences and VT100 character set escapes
+	s = nonColorAnsiRegex.ReplaceAllString(s, "")
+	s = vt100EscapeRegex.ReplaceAllString(s, "")
+
+	return s
 }
 
 // Tab swaps between viewports
@@ -60,6 +104,16 @@ type telemetryResultMsg struct {
 	paneID string
 	buffer string
 	err    error
+}
+
+type streamMsg struct {
+	paneID string
+	chunk  string
+	offset int64
+}
+
+type streamFinishedMsg struct {
+	paneID string
 }
 
 // Msg type sent back when Editor exits
@@ -180,6 +234,10 @@ type Model struct {
 	Height int
 
 	// Event-driven PTY pipe-pane and viewport states
+	ActiveStreamPaneID  string
+	ActiveStreamFile    string
+	StreamOffset        int64
+	StreamCancelChan    chan struct{}
 	Viewport            viewport.Model
 	ViewportInitialized bool
 }
@@ -228,6 +286,10 @@ func InitialModel() Model {
 		Height:                 24, // Default initialization fallback
 		Viewport:               viewport.New(0, 0),
 		ViewportInitialized:    false,
+		ActiveStreamPaneID:     "",
+		ActiveStreamFile:       "",
+		StreamOffset:           0,
+		StreamCancelChan:       nil,
 	}
 	m.populateDirList()
 	m.refreshFleet()
@@ -464,6 +526,110 @@ func (m *Model) queryTelemetryCmd() tea.Cmd {
 	}
 }
 
+func readNextChunk(filePath string, offset int64, cancel chan struct{}, paneID string) tea.Cmd {
+	return func() tea.Msg {
+		for {
+			// 1. Check if cancel signal received
+			select {
+			case <-cancel:
+				return streamFinishedMsg{paneID: paneID}
+			default:
+			}
+
+			// 2. Open the file to read new bytes
+			f, err := os.Open(filePath)
+			if err != nil {
+				time.Sleep(50 * time.Millisecond)
+				continue
+			}
+
+			fi, err := f.Stat()
+			if err != nil {
+				f.Close()
+				time.Sleep(50 * time.Millisecond)
+				continue
+			}
+
+			// 3. If file has grown beyond our last read offset, fetch new data
+			if fi.Size() > offset {
+				_, _ = f.Seek(offset, io.SeekStart)
+				buf := make([]byte, 8192)
+				n, _ := f.Read(buf)
+				if n > 0 {
+					f.Close()
+					return streamMsg{
+						paneID: paneID,
+						chunk:  string(buf[:n]),
+						offset: offset + int64(n),
+					}
+				}
+			}
+			f.Close()
+
+			// 4. No new data, wait and try again
+			time.Sleep(50 * time.Millisecond)
+		}
+	}
+}
+
+func (m *Model) TransitionStream(newPaneID string) tea.Cmd {
+	// 1. Cancel previous stream if active
+	if m.ActiveStreamPaneID != "" {
+		if m.StreamCancelChan != nil {
+			close(m.StreamCancelChan)
+		}
+		_ = tmux.StopPipePane(m.ActiveStreamPaneID)
+		if m.ActiveStreamFile != "" {
+			_ = os.Remove(m.ActiveStreamFile)
+		}
+	}
+
+	m.ActiveStreamPaneID = newPaneID
+	m.TelemetryBuffer = ""
+	m.Viewport.SetContent("")
+
+	if newPaneID == "" {
+		m.ActiveStreamFile = ""
+		m.StreamOffset = 0
+		m.StreamCancelChan = nil
+		return nil
+	}
+
+	// 2. Setup new temp stream file
+	tempPath := fmt.Sprintf("/tmp/mux-agent-%s-stream.log", newPaneID)
+	_ = os.Remove(tempPath) // Ensure stale logs are wiped
+
+	// Capture raw current terminal output with ANSI colors
+	initialBuffer, _ := tmux.CapturePaneRaw(newPaneID)
+
+	// Create empty file and write initial buffer history
+	f, err := os.Create(tempPath)
+	if err != nil {
+		m.ErrorMsg = fmt.Sprintf("Failed to initialize stream log: %v", err)
+		m.IsError = true
+		return nil
+	}
+	if initialBuffer != "" {
+		_, _ = f.WriteString(initialBuffer + "\n")
+	}
+	f.Close()
+
+	m.ActiveStreamFile = tempPath
+	m.StreamOffset = 0
+	m.StreamCancelChan = make(chan struct{})
+
+	// 3. Run tmux pipe-pane
+	err = tmux.StartPipePane(newPaneID, tempPath)
+	if err != nil {
+		m.ErrorMsg = fmt.Sprintf("Failed to initiate pipe-pane: %v", err)
+		m.IsError = true
+		return nil
+	}
+
+	// 4. Return tailer command
+	return readNextChunk(tempPath, 0, m.StreamCancelChan, newPaneID)
+}
+
 func (m *Model) recalcViewportSize() {
 	leftWidth := int(float64(m.Width) * 0.4)
 	if leftWidth < 22 {
@@ -480,9 +646,9 @@ func (m *Model) recalcViewportSize() {
 	}
 	rightTopHeight := int(float64(gridHeight) * 0.7)
 
-	rightTopInnerWidth := rightWidth - 4
+	rightTopInnerWidth := rightWidth - 8 // rightInnerWidth (rightWidth - 4) minus border and padding (4)
 	rightTopInnerHeight := rightTopHeight - 2
-	viewportHeight := rightTopInnerHeight - 1
+	viewportHeight := rightTopInnerHeight - 3 // Inner height minus header line (1) and padding/border allowance (2)
 	if viewportHeight < 1 {
 		viewportHeight = 1
 	}
@@ -510,7 +676,7 @@ func (m *Model) getActivePaneID() string {
 // Init initializes the Bubble Tea model
 func (m *Model) Init() tea.Cmd {
 	m.recalcViewportSize()
-	return tea.Batch(m.queryTelemetryCmd(), tickTelemetry())
+	return tea.Batch(tickTelemetry(), m.TransitionStream(m.getActivePaneID()))
 }
 
 // Update handles state changes on key presses and asynchronous message callbacks
@@ -523,27 +689,27 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case telemetryTickMsg:
-		var cmd tea.Cmd
 		if m.ActiveTab == TabFleet && !m.IsError {
 			m.refreshFleet() // Automatically refresh process scanning and active plan contexts
-			cmd = m.queryTelemetryCmd()
-		}
-		return m, tea.Batch(cmd, tickTelemetry())
-
-	case telemetryResultMsg:
-		if len(m.TreeItems) > 0 && m.SelectedTreeItem < len(m.TreeItems) {
-			item := m.TreeItems[m.SelectedTreeItem]
-			if !item.IsFolder && item.Pane.PaneID == msg.paneID {
-				if msg.err != nil {
-					m.TelemetryBuffer = fmt.Sprintf("Telemetry error: %v", msg.err)
-				} else {
-					m.TelemetryBuffer = msg.buffer
-				}
-				cleanText := cleanAnsiAndTabs(m.TelemetryBuffer)
-				m.Viewport.SetContent(cleanText)
-				m.Viewport.GotoBottom()
+			highlightedID := m.getActivePaneID()
+			if highlightedID != m.ActiveStreamPaneID {
+				return m, tea.Batch(m.TransitionStream(highlightedID), tickTelemetry())
 			}
 		}
+		return m, tickTelemetry()
+
+	case streamMsg:
+		if msg.paneID == m.ActiveStreamPaneID {
+			m.StreamOffset = msg.offset
+			m.TelemetryBuffer += msg.chunk // Accumulate telemetry
+			cleanText := cleanAnsiAndTabs(m.TelemetryBuffer)
+			m.Viewport.SetContent(cleanText)
+			m.Viewport.GotoBottom()
+			return m, readNextChunk(m.ActiveStreamFile, msg.offset, m.StreamCancelChan, msg.paneID)
+		}
+		return m, nil
+
+	case streamFinishedMsg:
 		return m, nil
 
 	case editorFinishedMsg:
@@ -643,6 +809,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		switch msg.String() {
 		case "q", "ctrl+c":
+			_ = m.TransitionStream("")
 			return m, tea.Quit
 
 		case "tab":
@@ -652,13 +819,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if m.ActiveTab == TabFleet {
 				m.ActiveTab = TabSpawner
-				m.TelemetryBuffer = "[Select an active agent to view telemetry]"
-				m.Viewport.SetContent(" [Select an active agent to view telemetry]")
-				return m, nil
+				return m, m.TransitionStream("")
 			} else {
 				m.ActiveTab = TabFleet
 				m.refreshFleet()
-				return m, m.queryTelemetryCmd()
+				return m, m.TransitionStream(m.getActivePaneID())
 			}
 
 		case "r", "R":
@@ -675,11 +840,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.SelectedTreeItem--
 					item := m.TreeItems[m.SelectedTreeItem]
 					if item.IsFolder {
-						m.TelemetryBuffer = "[Select an active agent to view telemetry]"
-						m.Viewport.SetContent(" [Select an active agent to view telemetry]")
-						return m, nil
+						return m, m.TransitionStream("")
 					} else {
-						return m, m.queryTelemetryCmd()
+						return m, m.TransitionStream(item.Pane.PaneID)
 					}
 				}
 			} else {
@@ -726,11 +889,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.SelectedTreeItem++
 					item := m.TreeItems[m.SelectedTreeItem]
 					if item.IsFolder {
-						m.TelemetryBuffer = "[Select an active agent to view telemetry]"
-						m.Viewport.SetContent(" [Select an active agent to view telemetry]")
-						return m, nil
+						return m, m.TransitionStream("")
 					} else {
-						return m, m.queryTelemetryCmd()
+						return m, m.TransitionStream(item.Pane.PaneID)
 					}
 				}
 			} else {
@@ -791,9 +952,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						for idx, ti := range m.TreeItems {
 							if ti.IsFolder && ti.Path == targetPath {
 								m.SelectedTreeItem = idx
-								m.TelemetryBuffer = "[Select an active agent to view telemetry]"
-								m.Viewport.SetContent(" [Select an active agent to view telemetry]")
-								break
+								return m, m.TransitionStream("")
 							}
 						}
 					}
@@ -1275,7 +1434,7 @@ func (m *Model) View() string {
 	} else if m.ActiveTab == TabFleet {
 		// ==================== TAB 1: FLEET RADAR ====================
 		// Left Panel (Radar Tree List)
-		maxLeftContentLines := leftInnerHeight - 1
+		maxLeftContentLines := leftInnerHeight - 5
 		if maxLeftContentLines < 1 {
 			maxLeftContentLines = 1
 		}
@@ -1335,6 +1494,28 @@ func (m *Model) View() string {
 
 		leftLinesSubset := []string{headerStyle.Render(" 󰙅  ACTIVE RADAR FLEET")}
 		leftLinesSubset = append(leftLinesSubset, slicedLeftContent...)
+
+		// Calculate busy/idle/total agents
+		busyCount := 0
+		idleCount := 0
+		for _, p := range m.FleetPanes {
+			g := strings.TrimSpace(p.ActiveGoal)
+			if g == "[No active plan - Idle]" || g == "[WAITING FOR TASK]" || g == "" {
+				idleCount++
+			} else {
+				busyCount++
+			}
+		}
+		totalCount := len(m.FleetPanes)
+
+		// Append divider and analytics status line
+		leftLinesSubset = append(leftLinesSubset, dividerStyle.Render(strings.Repeat("─", leftInnerWidth - 4)))
+		totalStr := lipgloss.NewStyle().Foreground(lipgloss.Color("#ffffff")).Bold(true).Render(fmt.Sprintf("%d", totalCount))
+		busyStr := lipgloss.NewStyle().Foreground(colorTeal).Bold(true).Render(fmt.Sprintf("%d", busyCount))
+		idleStr := lipgloss.NewStyle().Foreground(colorGray).Bold(true).Render(fmt.Sprintf("%d", idleCount))
+		statusText := fmt.Sprintf("  Deployed: %s  •  Busy: %s  •  Idle: %s", totalStr, busyStr, idleStr)
+		leftLinesSubset = append(leftLinesSubset, statusText)
+
 		leftView := currentLeftPanelStyle.Render(strings.Join(leftLinesSubset, "\n"))
 
 		// Top Right Panel (Live Telemetry Viewport)
@@ -1363,7 +1544,7 @@ func (m *Model) View() string {
 			}
 		}
 
-		maxDeckContentLines := rightBottomInnerHeight - 1
+		maxDeckContentLines := rightBottomInnerHeight - 3
 		if maxDeckContentLines < 1 {
 			maxDeckContentLines = 1
 		}
@@ -1689,10 +1870,10 @@ func (m *Model) View() string {
 			leftLines = append(leftLines, " "+fmt.Sprintf("Pane:   %s", selectedItemStyle.Render(m.ActivePaneID)))
 		}
 
-		if len(leftLines) > leftInnerHeight {
-			leftLines = leftLines[:leftInnerHeight]
+		if len(leftLines) > leftInnerHeight - 2 {
+			leftLines = leftLines[:leftInnerHeight - 2]
 		}
-		for len(leftLines) < leftInnerHeight {
+		for len(leftLines) < leftInnerHeight - 2 {
 			leftLines = append(leftLines, "")
 		}
 		leftView := currentLeftPanelStyle.Render(strings.Join(leftLines, "\n"))
@@ -1724,12 +1905,12 @@ func (m *Model) View() string {
 
 		footerLines := []string{
 			"",
-			dividerStyle.Render(strings.Repeat("─", rightInnerWidth)),
+			dividerStyle.Render(strings.Repeat("─", rightInnerWidth - 4)),
 			" " + footerHelp,
 		}
 
 		usedLines := len(rightLines) + len(footerLines)
-		paddingCount := leftInnerHeight - usedLines
+		paddingCount := (leftInnerHeight - 2) - usedLines
 		var paddedBody []string
 		paddedBody = append(paddedBody, rightLines...)
 		for i := 0; i < paddingCount; i++ {
@@ -1737,10 +1918,10 @@ func (m *Model) View() string {
 		}
 		paddedBody = append(paddedBody, footerLines...)
 
-		if len(paddedBody) > leftInnerHeight {
-			paddedBody = paddedBody[:leftInnerHeight]
+		if len(paddedBody) > leftInnerHeight - 2 {
+			paddedBody = paddedBody[:leftInnerHeight - 2]
 		}
-		for len(paddedBody) < leftInnerHeight {
+		for len(paddedBody) < leftInnerHeight - 2 {
 			paddedBody = append(paddedBody, "")
 		}
 		rightView := currentRightSpawnerStyle.Render(strings.Join(paddedBody, "\n"))

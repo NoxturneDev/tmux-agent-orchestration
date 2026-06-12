@@ -604,4 +604,25 @@ func CapturePaneRaw(paneID string) (string, error) {
 	return stdout.String(), nil
 }
 
+// StartPipePane tells tmux to stream standard output from a targeted pane to a specified file.
+func StartPipePane(paneID string, filePath string) error {
+	if paneID == "" {
+		return fmt.Errorf("empty pane ID")
+	}
+	escapedPath := EscapeShellSingleQuote(filePath)
+	escapedPathForTmux := strings.ReplaceAll(escapedPath, "%", "%%")
+	cmdStr := fmt.Sprintf("cat -u > '%s'", escapedPathForTmux)
+	cmd := exec.Command("tmux", "pipe-pane", "-t", paneID, cmdStr)
+	return cmd.Run()
+}
+
+// StopPipePane stops active streaming on the targeted pane.
+func StopPipePane(paneID string) error {
+	if paneID == "" {
+		return fmt.Errorf("empty pane ID")
+	}
+	cmd := exec.Command("tmux", "pipe-pane", "-t", paneID)
+	return cmd.Run()
+}
+
 
