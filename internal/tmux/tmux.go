@@ -554,6 +554,15 @@ func TeleportToPane(paneID string) error {
 	if paneID == "" {
 		return fmt.Errorf("empty pane ID")
 	}
+	// Check if target pane exists first
+	checkCmd := exec.Command("tmux", "has-session", "-t", paneID)
+	if err := checkCmd.Run(); err != nil {
+		return fmt.Errorf("pane %s does not exist (it may have exited or crashed on startup)", paneID)
+	}
+
+	// Focus the pane in its session/window
+	_ = exec.Command("tmux", "select-pane", "-t", paneID).Run()
+
 	cmd := exec.Command("tmux", "switch-client", "-t", paneID)
 	return cmd.Run()
 }
