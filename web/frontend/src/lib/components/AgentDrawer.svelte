@@ -41,6 +41,23 @@
       }
     };
   });
+
+  const killAgent = async () => {
+    if (!pane) return;
+    if (!confirm(`Are you sure you want to terminate agent "${pane.Command}" (Pane ${pane.PaneID})?`)) {
+      return;
+    }
+    try {
+      const res = await fetch(`/api/pane/${encodeURIComponent(pane.PaneID)}/kill`, {
+        method: 'POST'
+      });
+      if (!res.ok) throw new Error('Failed to terminate agent');
+      onclose();
+    } catch (e) {
+      console.error('Failed to kill agent:', e);
+      alert(`Error terminating agent: ${e.message}`);
+    }
+  };
 </script>
 
 <!-- svelte-ignore a11y_click_events_have_key_events -->
@@ -98,6 +115,8 @@
       </section>
 
       <footer class="drawer-footer">
+        <button class="btn btn-danger" on:click={killAgent}>Terminate Agent</button>
+        <div class="spacer"></div>
         <button class="btn btn-secondary" on:click={onclose}>Close Drawer</button>
         <button class="btn btn-primary" disabled title="Wired in V2">Isolate Pane</button>
       </footer>
@@ -331,5 +350,20 @@
   .btn-primary:disabled {
     opacity: 0.5;
     cursor: not-allowed;
+  }
+
+  .btn-danger {
+    background: linear-gradient(135deg, #ff1744, #d50000);
+    border: none;
+    color: #ffffff;
+  }
+
+  .btn-danger:hover:not(:disabled) {
+    box-shadow: 0 0 15px rgba(255, 23, 68, 0.4);
+    transform: translateY(-1px);
+  }
+
+  .spacer {
+    flex-grow: 1;
   }
 </style>

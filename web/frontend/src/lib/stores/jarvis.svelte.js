@@ -108,6 +108,15 @@ export function sendJarvisCommand(cmd) {
   ws.send(JSON.stringify({ content: cmd }));
 }
 
+export function sendIntervene() {
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    console.error('Cannot send intervention: WebSocket not connected');
+    return;
+  }
+  isThinking = false;
+  ws.send(JSON.stringify({ type: 'intervene' }));
+}
+
 export function disconnectJarvis() {
   cleanupWS();
   if (reconnectTimeout) {

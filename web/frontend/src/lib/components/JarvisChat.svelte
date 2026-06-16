@@ -1,6 +1,6 @@
 <script>
   import { onMount, tick } from 'svelte';
-  import { jarvis, connectJarvis, disconnectJarvis, sendJarvisCommand } from '../stores/jarvis.svelte.js';
+  import { jarvis, connectJarvis, disconnectJarvis, sendJarvisCommand, sendIntervene } from '../stores/jarvis.svelte.js';
   import { ansiToHtml } from '../utils/ansi.js';
   import ChatInput from './ChatInput.svelte';
   import { marked } from 'marked';
@@ -92,9 +92,17 @@
             </div>
             <div class="msg-body">
               <div class="thinking-loader">
-                <span class="dot"></span>
-                <span class="dot"></span>
-                <span class="dot"></span>
+                <div class="dots">
+                  <span class="dot"></span>
+                  <span class="dot"></span>
+                  <span class="dot"></span>
+                </div>
+                <button class="stop-btn" onclick={sendIntervene}>
+                  <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" class="stop-svg">
+                    <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                  </svg>
+                  <span>Stop Response</span>
+                </button>
               </div>
             </div>
           </div>
@@ -385,11 +393,17 @@
   .thinking-loader {
     display: flex;
     align-items: center;
-    gap: 6px;
-    padding: 12px 18px;
+    gap: 12px;
+    padding: 10px 16px;
     background: rgba(0, 229, 255, 0.05);
     border: 1px dashed var(--border-color);
     border-radius: 0 12px 12px 12px;
+  }
+
+  .thinking-loader .dots {
+    display: flex;
+    gap: 4px;
+    align-items: center;
   }
 
   .thinking-loader .dot {
@@ -402,6 +416,32 @@
 
   .thinking-loader .dot:nth-child(1) { animation-delay: -0.32s; }
   .thinking-loader .dot:nth-child(2) { animation-delay: -0.16s; }
+
+  .stop-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: rgba(244, 67, 54, 0.15);
+    border: 1px solid rgba(244, 67, 54, 0.35);
+    color: #ff8a80;
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-size: 0.75rem;
+    font-family: var(--font-sans);
+    font-weight: 600;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+  }
+
+  .stop-btn:hover {
+    background: rgba(244, 67, 54, 0.25);
+    border-color: rgba(244, 67, 54, 0.55);
+    color: #ffffff;
+  }
+
+  .stop-svg {
+    fill: currentColor;
+  }
 
   @keyframes pulse-dot-key {
     0%, 80%, 100% { transform: scale(0.6); opacity: 0.3; }

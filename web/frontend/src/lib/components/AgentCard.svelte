@@ -54,9 +54,9 @@
   </div>
 
   <div class="card-footer">
-    <div class="status-indicator">
-      <span class="animate-pulse-dot"></span>
-      <span class="status-text">Active</span>
+    <div class="status-indicator {pane.Status === 'IN PROGRESS' ? 'in-progress' : 'idle'}">
+      <span class="status-dot"></span>
+      <span class="status-text">{pane.Status || 'IDLE'}</span>
     </div>
     <span class="pane-id-tag">{pane.PaneID}</span>
   </div>
@@ -183,9 +183,37 @@
     gap: 6px;
   }
 
+  .status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    transition: all var(--transition-normal);
+  }
+
+  .in-progress .status-dot {
+    background-color: var(--accent-cyan);
+    box-shadow: 0 0 8px var(--accent-cyan);
+    animation: pulse 2s infinite ease-in-out;
+  }
+
+  .idle .status-dot {
+    background-color: #757575;
+    box-shadow: 0 0 4px rgba(117, 117, 117, 0.4);
+  }
+
   .status-text {
-    color: var(--accent-cyan);
     font-weight: 500;
+    font-size: 0.75rem;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+  }
+
+  .in-progress .status-text {
+    color: var(--accent-cyan);
+  }
+
+  .idle .status-text {
+    color: var(--text-muted);
   }
 
   .pane-id-tag {
