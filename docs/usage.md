@@ -43,3 +43,28 @@ A premium TUI dashboard and command deck built in Go using bubbletea and lipglos
 - Styled with a premium **24-bit TrueColor Indigo/Teal** theme.
 - Structured tag-based key helpers for navigation feedback.
 - Strict use of **Nerd Font** symbols (`󰚩`, ``, `󰓎`, ``, ``, ``, etc.) for visual accents instead of standard emojis.
+
+## Web Dashboard Companion
+
+The orchestrator includes a lightweight, real-time web dashboard companion served directly from the compiled binary.
+
+### Launching the Dashboard
+
+To start the dashboard HTTP server, run the `web` subcommand inside an active tmux session:
+
+```bash
+# Start on default port 8080
+./tmux-ai-orchestrator web
+
+# Start on a custom port
+./tmux-ai-orchestrator web --port=8069
+```
+
+Once started, open `http://localhost:8069` (or your chosen port) in your web browser.
+
+### Key Capabilities
+
+1. **Fleet Radar Grid**: A live view of all active AI agent panes across all tmux sessions. Card components display session details, plans, current goals, and active pulse telemetry indicators.
+2. **Agent Console Drawer**: Clicking any agent card opens a slide-over panel. This panel runs a live log viewer that captures and renders the target pane's raw terminal buffer (ANSI escape styling preserved).
+3. **Jarvis Supervisor Chat**: A bidirectional WebSocket interface to the `jarvis` supervisor pane. Messages entered in the web console are injected directly as pane input, and response streams are captured and appended dynamically.
+

@@ -1,7 +1,16 @@
 <script>
-  // Components will be imported here in Phase 3 & 4
-  // import FleetRadar from './lib/components/FleetRadar.svelte';
-  // import JarvisChat from './lib/components/JarvisChat.svelte';
+  import { onMount } from 'svelte';
+  import { connectFleet, disconnectFleet, fleet } from './lib/stores/fleet.js';
+  import { jarvis } from './lib/stores/jarvis.js';
+  import FleetRadar from './lib/components/FleetRadar.svelte';
+  import JarvisChat from './lib/components/JarvisChat.svelte';
+
+  onMount(() => {
+    connectFleet();
+    return () => {
+      disconnectFleet();
+    };
+  });
 </script>
 
 <div class="app-container">
@@ -15,14 +24,18 @@
     <div class="header-right">
       <div class="status-indicator">
         <span class="status-label">Fleet Stream:</span>
-        <span class="status-badge status-offline">Disconnected</span>
+        <span class="status-badge" class:status-connected={fleet.status === 'connected'} class:status-offline={fleet.status !== 'connected'}>
+          {fleet.status}
+        </span>
       </div>
       <div class="status-indicator">
         <span class="status-label">Jarvis WS:</span>
-        <span class="status-badge status-offline">Offline</span>
+        <span class="status-badge" class:status-connected={jarvis.status === 'online'} class:status-offline={jarvis.status !== 'online'}>
+          {jarvis.status}
+        </span>
       </div>
       <div class="agent-count-badge">
-        0 Agents
+        {fleet.panes.length} {fleet.panes.length === 1 ? 'Agent' : 'Agents'}
       </div>
     </div>
   </header>
@@ -33,8 +46,8 @@
         <h2>Fleet Radar</h2>
         <span class="panel-subtitle">Live agent panes monitoring</span>
       </div>
-      <div class="panel-content placeholder-content">
-        <p>Fleet Radar component loading...</p>
+      <div class="panel-content">
+        <FleetRadar />
       </div>
     </section>
 
@@ -43,8 +56,8 @@
         <h2>Jarvis Workspace Chat</h2>
         <span class="panel-subtitle">Bidirectional supervisor agent console</span>
       </div>
-      <div class="panel-content placeholder-content">
-        <p>Jarvis Chat component loading...</p>
+      <div class="panel-content">
+        <JarvisChat />
       </div>
     </section>
   </main>
@@ -123,6 +136,13 @@
     border-radius: 20px;
     font-size: 0.75rem;
     font-weight: 500;
+    text-transform: capitalize;
+  }
+
+  .status-connected {
+    background: rgba(0, 229, 255, 0.1);
+    color: var(--accent-cyan);
+    border: 1px solid var(--border-color);
   }
 
   .status-offline {
@@ -146,12 +166,13 @@
     grid-template-columns: 3.5fr 2.5fr;
     gap: 16px;
     flex-grow: 1;
-    min-height: 0; /* Important for flex child scroll behaviors */
+    min-height: 0;
   }
 
   .panel-header {
     padding: 16px 20px;
     border-bottom: 1px solid var(--border-color);
+    flex-shrink: 0;
   }
 
   .panel-header h2 {
@@ -179,21 +200,13 @@
     min-height: 0;
   }
 
-  .placeholder-content {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: var(--text-muted);
-    font-style: italic;
-  }
-
   @media (max-width: 1024px) {
     .app-body {
       grid-template-columns: 1fr;
       overflow-y: auto;
     }
     .panel-left, .panel-right {
-      height: 500px;
+      height: 550px;
     }
   }
 </style>

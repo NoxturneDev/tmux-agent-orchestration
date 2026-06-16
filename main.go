@@ -46,14 +46,14 @@ func main() {
 
 	// Handle 'web' subcommand
 	if len(os.Args) > 1 && os.Args[1] == "web" {
-		port := 8080
+		port := 8069
 		for _, arg := range os.Args[2:] {
 			if strings.HasPrefix(arg, "--port=") {
 				pStr := strings.TrimPrefix(arg, "--port=")
 				fmt.Sscanf(pStr, "%d", &port)
 			}
 		}
-		
+
 		// Run web dashboard server
 		if err := web.StartServer(port); err != nil {
 			fmt.Fprintf(os.Stderr, "Error starting web server: %v\n", err)

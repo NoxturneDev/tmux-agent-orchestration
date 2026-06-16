@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // SpawnTarget specifies the target tmux container layout for the agent
@@ -44,6 +45,7 @@ type AgentPane struct {
 	ActiveGoal string // Extracted objective from active_plan.md
 	WindowID   string // e.g., "2" (cleansed from tmux @2 representation)
 	PlanName   string // e.g., "epic_auth.md"
+	PID        int    // PID of the active agent/pane process
 }
 
 // EscapeShellSingleQuote escapes single quotes for use inside a single-quoted shell string.
@@ -64,11 +66,25 @@ func GetSpawnCommand(agentName, planName, prompt string) (string, error) {
 		return "", fmt.Errorf("unknown agent: %s", agentName)
 	}
 
-	escapedPrompt := EscapeShellSingleQuote(prompt)
 	if planName != "" {
-		return fmt.Sprintf("%s --plan=%s -i '%s'", targetCmd, planName, escapedPrompt), nil
+		// Embed plan instruction inside the prompt so the agent respects the subplan
+		promptWithPlan := fmt.Sprintf("CRITICAL: You are running on plan '%s'. Read, update, and write to '.agents/plan/active/%s' instead of '.agents/plan/active_plan.md' for all planning operations.\n\nTask: %s", planName, planName, prompt)
+		escapedPrompt := EscapeShellSingleQuote(promptWithPlan)
+		// Append a trailing sequence preventer comment to preserve planName in parent shell arguments
+		return fmt.Sprintf("%s -i '%s' ; true # --plan=%s", targetCmd, escapedPrompt, planName), nil
 	}
+	escapedPrompt := EscapeShellSingleQuote(prompt)
 	return fmt.Sprintf("%s -i '%s'", targetCmd, escapedPrompt), nil
+}
+
+// StartLockDaemon starts the lock daemon in the specified directory
+func StartLockDaemon(dir string) error {
+	cmd := exec.Command("/home/noxturne/agents/antigravity-cli", "daemon")
+	cmd.Dir = dir
+	cmd.Stdin = nil
+	cmd.Stdout = nil
+	cmd.Stderr = nil
+	return cmd.Start()
 }
 
 // SpawnAgent splits the window or creates a new window and runs the agent with the given prompt in the specified dir
@@ -84,6 +100,15 @@ func SpawnAgent(agentName, planName, prompt, dir string, target SpawnTarget, tar
 				}
 				return "", fmt.Errorf("lock collision: an active agent is already running in this workspace on plan '%s' (pane %s)", planDisplay, p.PaneID)
 			}
+		}
+	}
+
+	// Ensure lock daemon is running in the target directory
+	if dir != "" && dir != "." {
+		if !IsLockDaemonAlive(dir) {
+			_ = StartLockDaemon(dir)
+			// Small sleep to allow daemon socket to initialize
+			time.Sleep(100 * time.Millisecond)
 		}
 	}
 
@@ -137,17 +162,22 @@ func SpawnAgent(agentName, planName, prompt, dir string, target SpawnTarget, tar
 	}
 
 	// Tag the pane natively in tmux as an AI agent pane
-	_ = TagAgentPane(paneID, agentName)
+	_ = TagAgentPane(paneID, agentName, planName)
 
 	return paneID, nil
 }
 
 // TagAgentPane tags a tmux pane with custom options to identify it as an AI agent
-func TagAgentPane(paneID, agentName string) error {
+func TagAgentPane(paneID, agentName, planName string) error {
 	cmd1 := exec.Command("tmux", "set-option", "-p", "-t", paneID, "@is_agent", "1")
 	_ = cmd1.Run()
 	cmd2 := exec.Command("tmux", "set-option", "-p", "-t", paneID, "@agent_name", agentName)
-	return cmd2.Run()
+	_ = cmd2.Run()
+	if planName != "" {
+		cmd3 := exec.Command("tmux", "set-option", "-p", "-t", paneID, "@plan_name", planName)
+		_ = cmd3.Run()
+	}
+	return nil
 }
 
 // ListWindows returns all active tmux windows in the format "session_name:window_index (window_name)"
@@ -365,7 +395,7 @@ func buildPidTree() (map[int][]int, map[int]string, map[int]string) {
 }
 
 // isAgentProcess checks recursively if a pane PID or any descendant process is an AI agent
-func isAgentProcess(panePID int, parentToChildren map[int][]int, pidToComm map[int]string, pidToArgs map[int]string) (bool, string) {
+func isAgentProcess(panePID int, parentToChildren map[int][]int, pidToComm map[int]string, pidToArgs map[int]string) (bool, string, int) {
 	queue := []int{panePID}
 	visited := make(map[int]bool)
 
@@ -381,19 +411,19 @@ func isAgentProcess(panePID int, parentToChildren map[int][]int, pidToComm map[i
 		comm := pidToComm[curr]
 		args := pidToArgs[curr]
 		if strings.Contains(comm, "agy") || strings.Contains(comm, "gemini") || strings.Contains(comm, "claude") {
-			return true, comm
+			return true, comm, curr
 		}
 		if strings.Contains(args, "agy") || strings.Contains(args, "gemini") || strings.Contains(args, "claude") {
 			if strings.Contains(args, "agy") {
-				return true, "agy"
+				return true, "agy", curr
 			}
 			if strings.Contains(args, "gemini") {
-				return true, "gemini"
+				return true, "gemini", curr
 			}
 			if strings.Contains(args, "claude") {
-				return true, "claude"
+				return true, "claude", curr
 			}
-			return true, comm
+			return true, comm, curr
 		}
 
 		if children, ok := parentToChildren[curr]; ok {
@@ -401,7 +431,7 @@ func isAgentProcess(panePID int, parentToChildren map[int][]int, pidToComm map[i
 		}
 	}
 
-	return false, ""
+	return false, "", 0
 }
 
 // findPlanNameForPane walks the process tree of a pane and returns the plan name if `--plan=` argument is found
@@ -460,7 +490,7 @@ func IsLockDaemonAlive(dir string) bool {
 
 // ListAgentPanes queries host tmux for all running AI agent panes and silent-extracts their plans
 func ListAgentPanes() ([]AgentPane, error) {
-	cmd := exec.Command("tmux", "list-panes", "-a", "-F", "#{pane_id}|#{session_name}|#{window_id}|#{pane_current_command}|#{pane_current_path}|#{pane_pid}|#{@is_agent}|#{@agent_name}")
+	cmd := exec.Command("tmux", "list-panes", "-a", "-F", "#{pane_id}|#{session_name}|#{window_id}|#{window_name}|#{pane_current_command}|#{pane_current_path}|#{pane_pid}|#{@is_agent}|#{@agent_name}|#{@plan_name}")
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
 	err := cmd.Run()
@@ -480,38 +510,66 @@ func ListAgentPanes() ([]AgentPane, error) {
 			continue
 		}
 		parts := strings.Split(line, "|")
-		if len(parts) < 5 {
+		if len(parts) < 6 {
 			continue
 		}
 		paneID := parts[0]
 		session := parts[1]
 		windowID := strings.TrimPrefix(parts[2], "@") // clean prefix @ symbol
-		command := parts[3]
-		path := parts[4]
+		windowName := parts[3]
+		command := parts[4]
+		path := parts[5]
 
 		isAgent := false
 		displayCommand := command
 
-		// 1. Check native tmux tagging first
-		if len(parts) >= 8 && parts[6] == "1" {
+		// Recognize the Jarvis supervisor pane from the 0-agents session by window name
+		if strings.ToLower(windowName) == "jarvis" {
 			isAgent = true
-			if parts[7] != "" {
-				displayCommand = parts[7]
+			displayCommand = "jarvis"
+		}
+
+		// 1. Check native tmux tagging first
+		if len(parts) >= 9 && parts[7] == "1" {
+			isAgent = true
+			if parts[8] != "" {
+				displayCommand = parts[8]
 			}
 		}
 
 		var planName string
-		if len(parts) >= 6 {
-			panePID, err := strconv.Atoi(parts[5])
+		if len(parts) >= 10 && parts[9] != "" {
+			planName = parts[9]
+		}
+
+		var trackingPID int
+		if len(parts) >= 7 {
+			panePID, err := strconv.Atoi(parts[6])
 			if err == nil && panePID > 0 {
+				trackingPID = panePID
 				// 2. Process tree traversal if not natively tagged (or to get plan name)
-				if !isAgent {
-					if ok, matchedCmd := isAgentProcess(panePID, parentToChildren, pidToComm, pidToArgs); ok {
+				// If it's already recognized as jarvis, we still scan to get the inner process PID
+				var detectedPID int
+				var detectedCmd string
+				var detected bool
+				if ok, matchedCmd, matchedPID := isAgentProcess(panePID, parentToChildren, pidToComm, pidToArgs); ok {
+					detected = true
+					detectedCmd = matchedCmd
+					detectedPID = matchedPID
+				}
+				
+				if detected {
+					trackingPID = detectedPID
+					// Override command with matched process tree command ONLY if not already recognized as jarvis
+					if displayCommand != "jarvis" {
 						isAgent = true
-						displayCommand = matchedCmd
+						displayCommand = detectedCmd
 					}
 				}
-				planName = findPlanNameForPane(panePID, parentToChildren, pidToArgs)
+				
+				if planName == "" {
+					planName = findPlanNameForPane(panePID, parentToChildren, pidToArgs)
+				}
 			}
 		}
 
@@ -543,6 +601,7 @@ func ListAgentPanes() ([]AgentPane, error) {
 			ActiveGoal: activeGoal,
 			WindowID:   windowID,
 			PlanName:   planName,
+			PID:        trackingPID,
 		})
 	}
 
