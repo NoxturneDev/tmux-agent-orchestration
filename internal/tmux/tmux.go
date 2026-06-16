@@ -481,6 +481,14 @@ func PathsOverlap(path1, path2 string) bool {
 	return false
 }
 
+// ResolveProjectsDir returns "/mnt/workspace/projects" if it exists, otherwise falls back to "/home/noxturne/projects".
+func ResolveProjectsDir() string {
+	if _, err := os.Stat("/mnt/workspace/projects"); err == nil {
+		return "/mnt/workspace/projects"
+	}
+	return "/home/noxturne/projects"
+}
+
 // IsLockDaemonAlive queries lock daemon health status for a given directory
 func IsLockDaemonAlive(dir string) bool {
 	cmd := exec.Command("/home/noxturne/agents/antigravity-cli", "ping")
@@ -639,7 +647,7 @@ func TeleportToPane(paneID string) error {
 
 // ScanProjectsDir lists directories under /home/noxturne/projects and always appends "." as first choice
 func ScanProjectsDir() []string {
-	projectsPath := "/home/noxturne/projects"
+	projectsPath := ResolveProjectsDir()
 	dirs := []string{"."}
 
 	entries, err := os.ReadDir(projectsPath)
@@ -707,7 +715,7 @@ func ExtractActiveGoal(planPath string) string {
 // FindAllProjectSubdirs lists all directories under /home/noxturne/projects up to 3 levels deep relatively
 func FindAllProjectSubdirs() ([]string, error) {
 	cmd := exec.Command("find", "-L", ".", "-maxdepth", "3", "-type", "d", "-not", "-path", "*/.*")
-	cmd.Dir = "/home/noxturne/projects"
+	cmd.Dir = ResolveProjectsDir()
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
 	err := cmd.Run()

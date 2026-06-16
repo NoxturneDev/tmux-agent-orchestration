@@ -36,9 +36,10 @@ var (
 	jarvisClientsMu   sync.Mutex
 )
 
-const historyFilePath = "/home/noxturne/projects/tmux-ai-orchestrator/.agents/jarvis_chat_history.json"
+var historyFilePath string
 
 func init() {
+	historyFilePath = filepath.Join(tmux.ResolveProjectsDir(), "tmux-ai-orchestrator", ".agents", "jarvis_chat_history.json")
 	loadHistory()
 }
 

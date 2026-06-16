@@ -177,7 +177,7 @@ func openFzfCmd(dirs []string) tea.Cmd {
 
 	shellCmd := fmt.Sprintf("fzf --prompt='Select Directory: ' --height=40%% --layout=reverse --border --preview='tree -L 1 -C {1}' < %s > %s", listFile.Name(), outFile.Name())
 	c := exec.Command("bash", "-c", shellCmd)
-	c.Dir = "/home/noxturne/projects" // Set fzf working directory to projects root so relative preview works!
+	c.Dir = tmux.ResolveProjectsDir() // Set fzf working directory to projects root so relative preview works!
 
 	return tea.ExecProcess(c, func(err error) tea.Msg {
 		return fzfFinishedMsg{
@@ -260,7 +260,7 @@ func InitialModel() Model {
 	}
 	targets := []string{"Pane Split", "New Window"}
 
-	initialDir := "/home/noxturne/projects"
+	initialDir := tmux.ResolveProjectsDir()
 	if _, err := os.Stat(initialDir); err != nil {
 		initialDir = "."
 	}
@@ -817,9 +817,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cleanRelative := strings.TrimPrefix(selectedDir, "./")
 			cleanRelative = strings.TrimPrefix(cleanRelative, ".")
 
-			absoluteDir := "/home/noxturne/projects"
+			absoluteDir := tmux.ResolveProjectsDir()
 			if cleanRelative != "" {
-				absoluteDir = filepath.Join("/home/noxturne/projects", cleanRelative)
+				absoluteDir = filepath.Join(tmux.ResolveProjectsDir(), cleanRelative)
 			}
 
 			m.CurrentDirPath = filepath.Clean(absoluteDir)
@@ -1144,7 +1144,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else {
 				switch m.SpawnerState {
 				case SpawnerStateAgent:
-					initialDir := "/home/noxturne/projects"
+					initialDir := tmux.ResolveProjectsDir()
 					if _, err := os.Stat(initialDir); err != nil {
 						initialDir = "."
 					}
