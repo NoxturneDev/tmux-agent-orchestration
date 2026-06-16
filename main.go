@@ -11,6 +11,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/noxturne/tmux-ai-orchestrator/internal/ui"
+	"github.com/noxturne/tmux-ai-orchestrator/web"
 )
 
 func cleanUpTempStreams() {
@@ -41,6 +42,24 @@ func main() {
 	if os.Getenv("TMUX") == "" {
 		fmt.Fprintln(os.Stderr, "Error: This application must be run inside an active tmux session.")
 		os.Exit(1)
+	}
+
+	// Handle 'web' subcommand
+	if len(os.Args) > 1 && os.Args[1] == "web" {
+		port := 8080
+		for _, arg := range os.Args[2:] {
+			if strings.HasPrefix(arg, "--port=") {
+				pStr := strings.TrimPrefix(arg, "--port=")
+				fmt.Sscanf(pStr, "%d", &port)
+			}
+		}
+		
+		// Run web dashboard server
+		if err := web.StartServer(port); err != nil {
+			fmt.Fprintf(os.Stderr, "Error starting web server: %v\n", err)
+			os.Exit(1)
+		}
+		return
 	}
 
 	// Clean up any stale streams from previous crashes or runs
