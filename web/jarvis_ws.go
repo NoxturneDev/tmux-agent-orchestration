@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -20,14 +22,122 @@ var upgrader = websocket.Upgrader{
 	},
 }
 
+type ChatMessage struct {
+	Sender    string    `json:"sender"`    // "user" or "jarvis"
+	Content   string    `json:"content"`
+	Timestamp time.Time `json:"timestamp"`
+}
+
+var (
+	jarvisMessages    []ChatMessage
+	jarvisMessagesMu  sync.RWMutex
+	jarvisClientChans = make(map[chan ChatMessage]bool)
+	jarvisClientsMu   sync.Mutex
+)
+
+const historyFilePath = "/home/noxturne/projects/tmux-ai-orchestrator/.agents/jarvis_chat_history.json"
+
+func init() {
+	loadHistory()
+}
+
+func loadHistory() {
+	data, err := os.ReadFile(historyFilePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return
+		}
+		log.Printf("Error reading Jarvis history: %v", err)
+		return
+	}
+
+	var msgs []ChatMessage
+	if err := json.Unmarshal(data, &msgs); err != nil {
+		log.Printf("Error parsing Jarvis history: %v", err)
+		return
+	}
+
+	jarvisMessagesMu.Lock()
+	jarvisMessages = msgs
+	jarvisMessagesMu.Unlock()
+	log.Printf("Loaded %d messages from Jarvis chat history", len(msgs))
+}
+
+func saveHistory() {
+	jarvisMessagesMu.RLock()
+	data, err := json.MarshalIndent(jarvisMessages, "", "  ")
+	jarvisMessagesMu.RUnlock()
+	if err != nil {
+		log.Printf("Error marshaling Jarvis history: %v", err)
+		return
+	}
+
+	// Ensure parent directory exists
+	_ = os.MkdirAll(filepath.Dir(historyFilePath), 0755)
+
+	if err := os.WriteFile(historyFilePath, data, 0644); err != nil {
+		log.Printf("Error writing Jarvis history: %v", err)
+	}
+}
+
+// AddJarvisMessage appends a message to our store and broadcasts it to all WebSocket clients
+func AddJarvisMessage(sender, content string) {
+	msg := ChatMessage{
+		Sender:    sender,
+		Content:   content,
+		Timestamp: time.Now(),
+	}
+	jarvisMessagesMu.Lock()
+	jarvisMessages = append(jarvisMessages, msg)
+	jarvisMessagesMu.Unlock()
+
+	// Persist
+	saveHistory()
+
+	// Broadcast
+	jarvisClientsMu.Lock()
+	defer jarvisClientsMu.Unlock()
+	for ch := range jarvisClientChans {
+		select {
+		case ch <- msg:
+		default:
+		}
+	}
+}
+
+// handleJarvisResponse handles POST /api/jarvis/response
+func handleJarvisResponse(w http.ResponseWriter, r *http.Request) {
+	content := r.FormValue("content")
+	if content == "" {
+		// Try parsing JSON
+		var payload struct {
+			Content string `json:"content"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err == nil {
+			content = payload.Content
+		}
+	}
+
+	if content == "" {
+		http.Error(w, "missing content field", http.StatusBadRequest)
+		return
+	}
+
+	AddJarvisMessage("jarvis", content)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(`{"status":"success"}`))
+}
+
 type wsMessage struct {
 	Content string `json:"content"`
 }
 
 type wsResponse struct {
-	Status string `json:"status"` // "online" or "offline"
-	PaneID string `json:"paneId,omitempty"`
-	Raw    string `json:"raw,omitempty"`
+	Type    string       `json:"type"` // "status" or "message"
+	Status  string       `json:"status,omitempty"`
+	PaneID  string       `json:"paneId,omitempty"`
+	Message *ChatMessage `json:"message,omitempty"`
 }
 
 func handleJarvisWS(w http.ResponseWriter, r *http.Request) {
@@ -56,12 +166,11 @@ func handleJarvisWS(w http.ResponseWriter, r *http.Request) {
 		return "", false
 	}
 
-	// Goroutine: Stream Jarvis terminal raw output to browser
+	// Stream status events (online/offline)
 	go func() {
-		ticker := time.NewTicker(500 * time.Millisecond)
+		ticker := time.NewTicker(1 * time.Second)
 		defer ticker.Stop()
 
-		var lastRaw string
 		var lastStatus string
 
 		for {
@@ -73,36 +182,70 @@ func handleJarvisWS(w http.ResponseWriter, r *http.Request) {
 				if !online {
 					if lastStatus != "offline" {
 						writeMu.Lock()
-						_ = conn.WriteJSON(wsResponse{Status: "offline"})
+						_ = conn.WriteJSON(wsResponse{
+							Type:   "status",
+							Status: "offline",
+						})
 						writeMu.Unlock()
 						lastStatus = "offline"
-						lastRaw = ""
 					}
 					continue
 				}
 
-				raw, err := tmux.CapturePaneRaw(paneID)
-				if err != nil {
-					log.Printf("WS error capturing jarvis pane raw: %v", err)
-					continue
-				}
-
-				if raw != lastRaw || lastStatus != "online" {
+				if lastStatus != "online" {
 					writeMu.Lock()
 					_ = conn.WriteJSON(wsResponse{
+						Type:   "status",
 						Status: "online",
 						PaneID: paneID,
-						Raw:    raw,
 					})
 					writeMu.Unlock()
-					lastRaw = raw
 					lastStatus = "online"
 				}
 			}
 		}
 	}()
 
-	// Read messages from client and inject them into JARVIS pane
+	// Register this client's broadcast channel
+	clientChan := make(chan ChatMessage, 50)
+	jarvisClientsMu.Lock()
+	jarvisClientChans[clientChan] = true
+	jarvisClientsMu.Unlock()
+
+	defer func() {
+		jarvisClientsMu.Lock()
+		delete(jarvisClientChans, clientChan)
+		jarvisClientsMu.Unlock()
+	}()
+
+	// Send current chat history immediately to the client
+	jarvisMessagesMu.RLock()
+	for _, msg := range jarvisMessages {
+		clientChan <- msg
+	}
+	jarvisMessagesMu.RUnlock()
+
+	// Goroutine: read from clientChan and write to websocket
+	go func() {
+		for {
+			select {
+			case <-stopChan:
+				return
+			case msg, ok := <-clientChan:
+				if !ok {
+					return
+				}
+				writeMu.Lock()
+				_ = conn.WriteJSON(wsResponse{
+					Type:    "message",
+					Message: &msg,
+				})
+				writeMu.Unlock()
+			}
+		}
+	}()
+
+	// Read messages from client, add to history, broadcast, and inject them into JARVIS pane
 	for {
 		_, msgBytes, err := conn.ReadMessage()
 		if err != nil {
@@ -118,17 +261,24 @@ func handleJarvisWS(w http.ResponseWriter, r *http.Request) {
 		paneID, online := findJarvisPane()
 		if !online {
 			writeMu.Lock()
-			_ = conn.WriteJSON(wsResponse{Status: "offline"})
+			_ = conn.WriteJSON(wsResponse{
+				Type:   "status",
+				Status: "offline",
+			})
 			writeMu.Unlock()
 			continue
 		}
 
 		// Inject command input into JARVIS pane
 		if msg.Content != "" {
+			// Save the user's message in the API proxy store
+			AddJarvisMessage("user", msg.Content)
+
 			err := tmux.InjectPromptViaBuffer(paneID, msg.Content)
 			if err != nil {
 				log.Printf("WS error injecting prompt to pane %s: %v", paneID, err)
 			}
+			TriggerUpdate()
 		}
 	}
 }
