@@ -46,6 +46,7 @@ type AgentPane struct {
 	WindowID   string // e.g., "2" (cleansed from tmux @2 representation)
 	PlanName   string // e.g., "epic_auth.md"
 	PID        int    // PID of the active agent/pane process
+	Status     string // "IDLE" or "IN PROGRESS"
 }
 
 // EscapeShellSingleQuote escapes single quotes for use inside a single-quoted shell string.
@@ -593,6 +594,15 @@ func ListAgentPanes() ([]AgentPane, error) {
 		}
 		activeGoal := ExtractActiveGoal(planPath)
 
+		status := "IDLE"
+		if planPath != "" {
+			if content, err := os.ReadFile(planPath); err == nil {
+				if strings.Contains(string(content), "[IN PROGRESS - AGENT RUNNING]") {
+					status = "IN PROGRESS"
+				}
+			}
+		}
+
 		panes = append(panes, AgentPane{
 			PaneID:     paneID,
 			Session:    session,
@@ -602,6 +612,7 @@ func ListAgentPanes() ([]AgentPane, error) {
 			WindowID:   windowID,
 			PlanName:   planName,
 			PID:        trackingPID,
+			Status:     status,
 		})
 	}
 

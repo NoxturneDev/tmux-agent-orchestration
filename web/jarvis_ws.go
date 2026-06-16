@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -130,7 +131,8 @@ func handleJarvisResponse(w http.ResponseWriter, r *http.Request) {
 }
 
 type wsMessage struct {
-	Content string `json:"content"`
+	Type    string `json:"type,omitempty"` // "message" or "intervene"
+	Content string `json:"content,omitempty"`
 }
 
 type wsResponse struct {
@@ -266,6 +268,26 @@ func handleJarvisWS(w http.ResponseWriter, r *http.Request) {
 				Status: "offline",
 			})
 			writeMu.Unlock()
+			continue
+		}
+
+		if msg.Type == "intervene" {
+			// Send C-c to Jarvis pane
+			_ = exec.Command("tmux", "send-keys", "-t", paneID, "C-c").Run()
+
+			// Send C-c to all active worker agent panes
+			panes, err := tmux.ListAgentPanes()
+			if err == nil {
+				for _, p := range panes {
+					if p.PaneID != paneID {
+						_ = exec.Command("tmux", "send-keys", "-t", p.PaneID, "C-c").Run()
+					}
+				}
+			}
+
+			// Add system intervention notice to logs and save
+			AddJarvisMessage("jarvis", "_[Intervention: Response generation halted by user]_")
+			TriggerUpdate()
 			continue
 		}
 

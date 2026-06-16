@@ -238,3 +238,29 @@ func handlePaneRaw(w http.ResponseWriter, r *http.Request) {
 	}
 	json.NewEncoder(w).Encode(resp)
 }
+
+// handlePaneKill handles POST /api/pane/{id}/kill
+func handlePaneKill(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	id := r.PathValue("id")
+	if id == "" {
+		http.Error(w, `{"error": "missing pane id"}`, http.StatusBadRequest)
+		return
+	}
+
+	err := tmux.KillPane(id)
+	if err != nil {
+		http.Error(w, fmt.Sprintf(`{"error": "%s"}`, err.Error()), http.StatusInternalServerError)
+		return
+	}
+
+	// Trigger SSE update so frontend updates its list immediately
+	TriggerUpdate()
+
+	resp := map[string]string{
+		"status":  "ok",
+		"message": fmt.Sprintf("Pane %s killed successfully", id),
+	}
+	json.NewEncoder(w).Encode(resp)
+}
+

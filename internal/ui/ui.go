@@ -339,6 +339,20 @@ func (m *Model) refreshFleet() {
 	}
 	m.FleetPanes = panes
 	m.rebuildTree()
+
+	// Proactively check and start lock daemons in the background so they are ready
+	go func() {
+		seenPaths := make(map[string]bool)
+		for _, p := range panes {
+			if p.Path == "" || seenPaths[p.Path] {
+				continue
+			}
+			seenPaths[p.Path] = true
+			if !tmux.IsLockDaemonAlive(p.Path) {
+				_ = tmux.StartLockDaemon(p.Path)
+			}
+		}
+	}()
 }
 
 // rebuildTree aggregates panes by dir and sorts them to form the interactive tree

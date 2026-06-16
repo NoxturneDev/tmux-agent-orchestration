@@ -16,6 +16,7 @@ func StartServer(port int) error {
 	mux.HandleFunc("GET /api/fleet/stream", handleFleetSSE)
 	mux.HandleFunc("GET /api/pane/{id}/buffer", handlePaneBuffer)
 	mux.HandleFunc("GET /api/pane/{id}/raw", handlePaneRaw)
+	mux.HandleFunc("POST /api/pane/{id}/kill", handlePaneKill)
 	mux.HandleFunc("POST /api/jarvis/response", handleJarvisResponse)
 
 	// WebSocket Endpoint
