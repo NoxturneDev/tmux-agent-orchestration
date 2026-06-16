@@ -1,8 +1,9 @@
 <script>
   import { onMount, tick } from 'svelte';
-  import { jarvis, connectJarvis, disconnectJarvis, sendJarvisCommand } from '../stores/jarvis.js';
+  import { jarvis, connectJarvis, disconnectJarvis, sendJarvisCommand } from '../stores/jarvis.svelte.js';
   import { ansiToHtml } from '../utils/ansi.js';
   import ChatInput from './ChatInput.svelte';
+  import { marked } from 'marked';
 
   let messageContainer = $state(null);
 
@@ -74,12 +75,31 @@
               {#if msg.sender === 'user'}
                 <p class="user-text">{msg.content}</p>
               {:else}
-                <pre class="terminal-block">{@html ansiToHtml(msg.content)}</pre>
+                <div class="markdown-body animate-fade-in">
+                  {@html marked.parse(msg.content)}
+                </div>
               {/if}
             </div>
           </div>
         </div>
       {/each}
+      {#if jarvis.isThinking}
+        <div class="message-row jarvis-msg">
+          <div class="msg-bubble animate-fade-in">
+            <div class="msg-header">
+              <span class="msg-sender">JARVIS Console</span>
+              <span class="msg-time">thinking...</span>
+            </div>
+            <div class="msg-body">
+              <div class="thinking-loader">
+                <span class="dot"></span>
+                <span class="dot"></span>
+                <span class="dot"></span>
+              </div>
+            </div>
+          </div>
+        </div>
+      {/if}
     {/if}
   </div>
 
@@ -300,10 +320,91 @@
     box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.5);
   }
 
+  .markdown-body {
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid var(--border-color);
+    padding: 14px;
+    border-radius: 0 12px 12px 12px;
+    font-size: 0.85rem;
+    line-height: 1.6;
+    color: #e2e8f0;
+    word-break: break-word;
+  }
+
+  .markdown-body :global(p) {
+    margin-bottom: 12px;
+  }
+  .markdown-body :global(p:last-child) {
+    margin-bottom: 0;
+  }
+  .markdown-body :global(h1), .markdown-body :global(h2), .markdown-body :global(h3) {
+    color: #ffffff;
+    margin-top: 16px;
+    margin-bottom: 8px;
+    font-weight: 600;
+  }
+  .markdown-body :global(h1) { font-size: 1.2rem; }
+  .markdown-body :global(h2) { font-size: 1.1rem; }
+  .markdown-body :global(h3) { font-size: 1rem; }
+  .markdown-body :global(ul), .markdown-body :global(ol) {
+    margin-left: 20px;
+    margin-bottom: 12px;
+  }
+  .markdown-body :global(li) {
+    margin-bottom: 4px;
+  }
+  .markdown-body :global(code) {
+    font-family: var(--font-mono);
+    background: rgba(0, 0, 0, 0.3);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 0.8rem;
+    color: var(--accent-cyan);
+  }
+  .markdown-body :global(pre) {
+    background: #03060f;
+    border: 1px solid rgba(0, 229, 255, 0.1);
+    padding: 12px;
+    border-radius: 6px;
+    overflow-x: auto;
+    margin-bottom: 12px;
+  }
+  .markdown-body :global(pre code) {
+    background: none;
+    padding: 0;
+    color: #cbd5e1;
+  }
+
   .chat-footer {
     padding: 16px;
     border-top: 1px solid var(--border-color);
     background: rgba(0, 0, 0, 0.15);
     flex-shrink: 0;
+  }
+
+  .thinking-loader {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 12px 18px;
+    background: rgba(0, 229, 255, 0.05);
+    border: 1px dashed var(--border-color);
+    border-radius: 0 12px 12px 12px;
+  }
+
+  .thinking-loader .dot {
+    width: 6px;
+    height: 6px;
+    background: var(--accent-cyan);
+    border-radius: 50%;
+    animation: pulse-dot-key 1.4s infinite ease-in-out both;
+  }
+
+  .thinking-loader .dot:nth-child(1) { animation-delay: -0.32s; }
+  .thinking-loader .dot:nth-child(2) { animation-delay: -0.16s; }
+
+  @keyframes pulse-dot-key {
+    0%, 80%, 100% { transform: scale(0.6); opacity: 0.3; }
+    40% { transform: scale(1.0); opacity: 1; }
   }
 </style>

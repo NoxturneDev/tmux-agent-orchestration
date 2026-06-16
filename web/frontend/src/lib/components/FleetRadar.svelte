@@ -1,5 +1,5 @@
 <script>
-  import { fleet } from '../stores/fleet.js';
+  import { fleet } from '../stores/fleet.svelte.js';
   import AgentCard from './AgentCard.svelte';
   import AgentDrawer from './AgentDrawer.svelte';
 

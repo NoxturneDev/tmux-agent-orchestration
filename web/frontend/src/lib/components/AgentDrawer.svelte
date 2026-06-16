@@ -10,7 +10,7 @@
   const fetchLogs = async () => {
     if (!pane) return;
     try {
-      const res = await fetch(`/api/pane/${pane.PaneID}/raw`);
+      const res = await fetch(`/api/pane/${encodeURIComponent(pane.PaneID)}/raw`);
       if (!res.ok) throw new Error('API request failed');
       const data = await res.json();
       rawLogs = data.raw || 'No logs available.';
