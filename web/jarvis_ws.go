@@ -221,13 +221,6 @@ func handleJarvisWS(w http.ResponseWriter, r *http.Request) {
 		jarvisClientsMu.Unlock()
 	}()
 
-	// Send current chat history immediately to the client
-	jarvisMessagesMu.RLock()
-	for _, msg := range jarvisMessages {
-		clientChan <- msg
-	}
-	jarvisMessagesMu.RUnlock()
-
 	// Goroutine: read from clientChan and write to websocket
 	go func() {
 		for {
@@ -247,6 +240,13 @@ func handleJarvisWS(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}()
+
+	// Send current chat history immediately to the client
+	jarvisMessagesMu.RLock()
+	for _, msg := range jarvisMessages {
+		clientChan <- msg
+	}
+	jarvisMessagesMu.RUnlock()
 
 	// Read messages from client, add to history, broadcast, and inject them into JARVIS pane
 	for {
