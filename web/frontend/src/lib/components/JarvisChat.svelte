@@ -25,6 +25,46 @@
   let currentlySpeakingIndex = $state(null);
   let isTtsSupported = $state(false);
 
+  let showReviewModal = $state(false);
+  let reviewPlanMessage = $state(null);
+  let reviewFeedbackText = $state('');
+  let bannerDismissed = $state(false);
+
+  function hasPlan(content) {
+    if (!content) return false;
+    return content.includes('## Technical Goal') || 
+           content.includes('## Key Design Decisions') || 
+           content.includes('## Technical Tasks') || 
+           content.includes('## Commit Strategy') || 
+           content.includes('Please review this commit plan');
+  }
+
+  let latestPlanMessage = $derived.by(() => {
+    for (let i = jarvis.messages.length - 1; i >= 0; i--) {
+      const msg = jarvis.messages[i];
+      if (msg.sender === 'jarvis' && hasPlan(msg.content)) {
+        return msg;
+      }
+    }
+    return null;
+  });
+
+  $effect(() => {
+    if (latestPlanMessage) {
+      bannerDismissed = false;
+    }
+  });
+
+  async function approveAndProceed() {
+    let msg = 'Proceed with the implementation.';
+    if (reviewFeedbackText.trim()) {
+      msg = `${reviewFeedbackText.trim()}`;
+    }
+    showReviewModal = false;
+    reviewFeedbackText = '';
+    await sendJarvisCommand(msg);
+  }
+
   onMount(() => {
     isTtsSupported = typeof window !== 'undefined' && 'speechSynthesis' in window;
     connectJarvis();
@@ -145,6 +185,27 @@
     {/if}
   </div>
 
+  {#if latestPlanMessage && !showReviewModal && !bannerDismissed}
+    <div class="floating-plan-banner animate-fade-in">
+      <div class="banner-info">
+        <span class="banner-icon">📋</span>
+        <span class="banner-text">Implementation plan is ready for review.</span>
+      </div>
+      <div class="banner-actions">
+        <button class="banner-action-btn" onclick={() => {
+          reviewPlanMessage = latestPlanMessage;
+          reviewFeedbackText = '';
+          showReviewModal = true;
+        }}>
+          Open Review Modal
+        </button>
+        <button class="banner-dismiss-btn" onclick={() => bannerDismissed = true} title="Dismiss notification">
+          &times;
+        </button>
+      </div>
+    </div>
+  {/if}
+
   <div class="chat-messages" bind:this={messageContainer}>
     {#if jarvis.messages.length === 0}
       <div class="welcome-container">
@@ -169,23 +230,45 @@
             <div class="msg-header">
               <span class="msg-sender">{msg.sender === 'user' ? 'You' : 'JARVIS Console'}</span>
               <span class="msg-time">{msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
-              {#if isTtsSupported && msg.sender === 'jarvis'}
-                <button 
-                  class="speak-msg-btn" 
-                  class:speaking={currentlySpeakingIndex === idx} 
-                  onclick={() => speakMessage(msg.content, idx)}
-                  title={currentlySpeakingIndex === idx ? "Stop speaking" : "Speak message"}
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                    {#if currentlySpeakingIndex === idx}
-                      <rect x="4" y="4" width="16" height="16" rx="2" ry="2"></rect>
-                    {:else}
-                      <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
-                      <path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path>
-                    {/if}
-                  </svg>
-                </button>
-              {/if}
+              <div class="msg-header-actions">
+                {#if hasPlan(msg.content)}
+                  <button 
+                    class="review-plan-btn"
+                    onclick={() => {
+                      reviewPlanMessage = msg;
+                      reviewFeedbackText = '';
+                      showReviewModal = true;
+                    }}
+                    title="Open plan in large review modal"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                      <polyline points="14 2 14 8 20 8"></polyline>
+                      <line x1="16" y1="13" x2="8" y2="13"></line>
+                      <line x1="16" y1="17" x2="8" y2="17"></line>
+                      <polyline points="10 9 9 9 8 9"></polyline>
+                    </svg>
+                    <span>Review Plan</span>
+                  </button>
+                {/if}
+                {#if isTtsSupported && msg.sender === 'jarvis'}
+                  <button 
+                    class="speak-msg-btn" 
+                    class:speaking={currentlySpeakingIndex === idx} 
+                    onclick={() => speakMessage(msg.content, idx)}
+                    title={currentlySpeakingIndex === idx ? "Stop speaking" : "Speak message"}
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                      {#if currentlySpeakingIndex === idx}
+                        <rect x="4" y="4" width="16" height="16" rx="2" ry="2"></rect>
+                      {:else}
+                        <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+                        <path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+                      {/if}
+                    </svg>
+                  </button>
+                {/if}
+              </div>
             </div>
             <div class="msg-body">
               {#if msg.sender === 'user'}
@@ -234,6 +317,49 @@
     />
   </div>
 </div>
+
+<!-- svelte-ignore a11y_click_events_have_key_events -->
+<!-- svelte-ignore a11y_no_static_element_interactions -->
+{#if showReviewModal && reviewPlanMessage}
+  <div class="modal-backdrop" onclick={() => showReviewModal = false}>
+    <!-- svelte-ignore a11y_click_events_have_key_events -->
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div class="review-modal glass-panel" onclick={(e) => e.stopPropagation()}>
+      <header class="modal-header">
+        <div class="modal-title">
+          <h3>📋 Review Implementation Plan</h3>
+          <span class="modal-subtitle">Verify features, tasks, and proposed git commit structure</span>
+        </div>
+        <button class="close-modal-btn" onclick={() => showReviewModal = false}>&times;</button>
+      </header>
+
+      <main class="modal-body">
+        <div class="plan-content-scroll markdown-body">
+          {@html marked.parse(reviewPlanMessage.content)}
+        </div>
+        <div class="feedback-section">
+          <label for="feedback-textarea">Add additional review context / feedback (optional):</label>
+          <textarea
+            id="feedback-textarea"
+            bind:value={reviewFeedbackText}
+            placeholder="e.g. Looks good, go ahead! Or request changes here..."
+            rows="3"
+          ></textarea>
+        </div>
+      </main>
+
+      <footer class="modal-footer">
+        <button class="btn btn-secondary" onclick={() => showReviewModal = false}>Cancel</button>
+        <button class="btn btn-primary" onclick={approveAndProceed}>
+          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="20 6 9 17 4 12"></polyline>
+          </svg>
+          Approve & Proceed
+        </button>
+      </footer>
+    </div>
+  </div>
+{/if}
 
 <style>
   .jarvis-chat-container {
@@ -625,5 +751,260 @@
   @keyframes bounce-scale-key {
     0%, 100% { transform: scale(1); }
     50% { transform: scale(1.15); }
+  }
+
+  /* Message Header Actions */
+  .msg-header {
+    display: flex;
+    align-items: center;
+    width: 100%;
+  }
+
+  .msg-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-left: auto;
+  }
+
+  .review-plan-btn {
+    background: rgba(0, 229, 255, 0.1);
+    border: 1px solid rgba(0, 229, 255, 0.25);
+    color: var(--accent-cyan);
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-size: 0.7rem;
+    font-weight: 500;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    transition: all var(--transition-fast);
+  }
+
+  .review-plan-btn:hover {
+    background: rgba(0, 229, 255, 0.2);
+    border-color: var(--accent-cyan);
+    transform: translateY(-1px);
+    box-shadow: 0 0 6px rgba(0, 229, 255, 0.15);
+  }
+
+  /* Floating Plan Banner */
+  .floating-plan-banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    background: rgba(0, 229, 255, 0.08);
+    border-bottom: 1px solid rgba(0, 229, 255, 0.2);
+    padding: 8px 16px;
+    font-size: 0.8rem;
+    color: var(--text-primary);
+    animation: fadeIn var(--transition-normal) forwards;
+    flex-shrink: 0;
+  }
+
+  .floating-plan-banner .banner-info {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .floating-plan-banner .banner-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .banner-action-btn {
+    background: var(--accent-cyan);
+    border: none;
+    color: #000000;
+    padding: 4px 10px;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+  }
+
+  .banner-action-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 0 8px var(--accent-cyan);
+  }
+
+  .banner-dismiss-btn {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    font-size: 1.1rem;
+    cursor: pointer;
+    padding: 0 4px;
+    line-height: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: color var(--transition-fast);
+  }
+
+  .banner-dismiss-btn:hover {
+    color: #ffffff;
+  }
+
+  /* Review Modal Styles */
+  .modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(3, 6, 15, 0.75);
+    backdrop-filter: blur(8px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+    padding: 24px;
+    animation: fadeIn 0.2s ease-out;
+  }
+
+  .review-modal {
+    width: 100%;
+    max-width: 800px;
+    max-height: calc(100vh - 48px);
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-glass);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+    overflow: hidden;
+  }
+
+  .modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border-color);
+    flex-shrink: 0;
+  }
+
+  .modal-title h3 {
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: #ffffff;
+    margin-bottom: 4px;
+  }
+
+  .modal-subtitle {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+  }
+
+  .close-modal-btn {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    font-size: 1.5rem;
+    cursor: pointer;
+    transition: color var(--transition-fast);
+    line-height: 1;
+  }
+
+  .close-modal-btn:hover {
+    color: #ffffff;
+  }
+
+  .modal-body {
+    flex-grow: 1;
+    overflow-y: auto;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    min-height: 0;
+  }
+
+  .plan-content-scroll {
+    flex-grow: 1;
+    overflow-y: auto;
+    background: rgba(3, 6, 15, 0.4);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 16px;
+    min-height: 200px;
+  }
+
+  .feedback-section {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+
+  .feedback-section label {
+    font-size: 0.8rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+  }
+
+  .feedback-section textarea {
+    background: rgba(3, 6, 15, 0.6);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 10px;
+    color: #ffffff;
+    font-size: 0.85rem;
+    font-family: var(--font-sans);
+    resize: none;
+    outline: none;
+    transition: border-color var(--transition-fast);
+  }
+
+  .feedback-section textarea:focus {
+    border-color: var(--accent-cyan);
+  }
+
+  .modal-footer {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 12px;
+    padding: 12px 20px;
+    border-top: 1px solid var(--border-color);
+    background: rgba(13, 18, 34, 0.4);
+    flex-shrink: 0;
+  }
+
+  .btn {
+    padding: 8px 16px;
+    border-radius: 6px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    transition: all var(--transition-fast);
+  }
+
+  .btn-secondary {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: var(--text-secondary);
+  }
+
+  .btn-secondary:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: #ffffff;
+  }
+
+  .btn-primary {
+    background: var(--accent-cyan);
+    border: 1px solid var(--accent-cyan);
+    color: #000000;
+  }
+
+  .btn-primary:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 0 12px rgba(0, 229, 255, 0.4);
   }
 </style>
