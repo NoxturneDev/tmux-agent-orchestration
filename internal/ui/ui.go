@@ -1416,6 +1416,9 @@ func getAgentIcon(command string) string {
 	if strings.Contains(cmd, "claude") {
 		return "󰘧 "
 	}
+	if strings.Contains(cmd, "opencode") {
+		return " "
+	}
 	return " "
 }
 
@@ -1686,6 +1689,8 @@ func (m *Model) View() string {
 					agentClient = "Gemini"
 				} else if strings.Contains(cmdLower, "claude") {
 					agentClient = "Claude"
+				} else if strings.Contains(cmdLower, "opencode") {
+					agentClient = "OpenCode"
 				} else {
 					agentClient = item.Pane.Command
 				}

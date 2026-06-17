@@ -34,6 +34,7 @@ var Agents = []AgentConfig{
 	{Name: "gemini-p1", Command: "mkdir -p ~/.gemini-personal && HOME=$HOME/.gemini-personal gemini"},
 	{Name: "agy-p2", Command: "mkdir -p ~/.antigravity-work && HOME=$HOME/.antigravity-work agy"},
 	{Name: "gemini-p2", Command: "mkdir -p ~/.gemini-work && HOME=$HOME/.gemini-work gemini"},
+	{Name: "opencode", Command: "opencode"},
 }
 
 // AgentPane holds parsed host tmux pane metadata for Mission Control (AI Fleet Radar)
@@ -72,9 +73,15 @@ func GetSpawnCommand(agentName, planName, prompt string) (string, error) {
 		promptWithPlan := fmt.Sprintf("CRITICAL: You are running on plan '%s'. Read, update, and write to '.agents/plan/active/%s' instead of '.agents/plan/active_plan.md' for all planning operations.\n\nTask: %s", planName, planName, prompt)
 		escapedPrompt := EscapeShellSingleQuote(promptWithPlan)
 		// Append a trailing sequence preventer comment to preserve planName in parent shell arguments
+		if strings.Contains(agentName, "opencode") {
+			return fmt.Sprintf("%s --prompt '%s' ; true # --plan=%s", targetCmd, escapedPrompt, planName), nil
+		}
 		return fmt.Sprintf("%s -i '%s' ; true # --plan=%s", targetCmd, escapedPrompt, planName), nil
 	}
 	escapedPrompt := EscapeShellSingleQuote(prompt)
+	if strings.Contains(agentName, "opencode") {
+		return fmt.Sprintf("%s --prompt '%s'", targetCmd, escapedPrompt), nil
+	}
 	return fmt.Sprintf("%s -i '%s'", targetCmd, escapedPrompt), nil
 }
 
@@ -411,10 +418,10 @@ func isAgentProcess(panePID int, parentToChildren map[int][]int, pidToComm map[i
 
 		comm := pidToComm[curr]
 		args := pidToArgs[curr]
-		if strings.Contains(comm, "agy") || strings.Contains(comm, "gemini") || strings.Contains(comm, "claude") {
+		if strings.Contains(comm, "agy") || strings.Contains(comm, "gemini") || strings.Contains(comm, "claude") || strings.Contains(comm, "opencode") {
 			return true, comm, curr
 		}
-		if strings.Contains(args, "agy") || strings.Contains(args, "gemini") || strings.Contains(args, "claude") {
+		if strings.Contains(args, "agy") || strings.Contains(args, "gemini") || strings.Contains(args, "claude") || strings.Contains(args, "opencode") {
 			if strings.Contains(args, "agy") {
 				return true, "agy", curr
 			}
@@ -423,6 +430,9 @@ func isAgentProcess(panePID int, parentToChildren map[int][]int, pidToComm map[i
 			}
 			if strings.Contains(args, "claude") {
 				return true, "claude", curr
+			}
+			if strings.Contains(args, "opencode") {
+				return true, "opencode", curr
 			}
 			return true, comm, curr
 		}
@@ -614,7 +624,7 @@ func ListAgentPanes() ([]AgentPane, error) {
 
 		// 3. Fallback check (command name matching)
 		if !isAgent {
-			if strings.Contains(command, "agy") || strings.Contains(command, "gemini") || strings.Contains(command, "claude") {
+			if strings.Contains(command, "agy") || strings.Contains(command, "gemini") || strings.Contains(command, "claude") || strings.Contains(command, "opencode") {
 				isAgent = true
 			}
 		}

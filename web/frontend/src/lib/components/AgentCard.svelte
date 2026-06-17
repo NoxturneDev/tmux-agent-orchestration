@@ -15,6 +15,7 @@
     if (lowercase.includes('jarvis')) return '🧠';
     if (lowercase.includes('gemini')) return '♊';
     if (lowercase.includes('claude')) return '⛵';
+    if (lowercase.includes('opencode')) return '🔓';
     return '🤖';
   };
 </script>
