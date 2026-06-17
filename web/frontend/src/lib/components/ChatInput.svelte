@@ -1,5 +1,6 @@
 <script>
   import { onMount } from 'svelte';
+  import { fleet } from '../stores/fleet.svelte.js';
 
   let { disabled = false, onsend } = $props();
 
@@ -10,6 +11,60 @@
   let permissionError = $state('');
   let bannerDismissed = $state(false);
   let recognition = null;
+  let textareaEl = $state(null);
+
+  const BASE_COMMANDS = [
+    { cmd: '/spawn', desc: 'Spawn a new agent' },
+    { cmd: '/kill', desc: 'Terminate an active agent pane' },
+    { cmd: '/status', desc: 'Check system status' },
+    { cmd: '/intercom', desc: 'Send intercom query to another agent' },
+    { cmd: '/clear', desc: 'Clear console logs' },
+    { cmd: '/plan', desc: 'Generate or review active plans' },
+    { cmd: '/help', desc: 'Show list of available commands' }
+  ];
+
+  let suggestions = $derived.by(() => {
+    if (!text.startsWith('/')) return [];
+
+    const val = text.trim();
+    if (val === '/') {
+      return BASE_COMMANDS;
+    }
+
+    if (val.startsWith('/kill ')) {
+      const paneSuggestions = fleet.panes.map(p => ({
+        cmd: `/kill ${p.Command || p.PaneID}`,
+        desc: `Kill ${p.Command} (Pane ${p.PaneID})`
+      }));
+      return paneSuggestions.filter(s => s.cmd.toLowerCase().includes(val.toLowerCase()));
+    }
+
+    if (val.startsWith('/intercom ')) {
+      const paneSuggestions = fleet.panes.map(p => ({
+        cmd: `/intercom ${p.Command || p.PaneID} `,
+        desc: `Send intercom message to ${p.Command}`
+      }));
+      return paneSuggestions.filter(s => s.cmd.toLowerCase().includes(val.toLowerCase()));
+    }
+
+    return BASE_COMMANDS.filter(s => s.cmd.toLowerCase().startsWith(val.toLowerCase()));
+  });
+
+  let showSuggestions = $derived(suggestions.length > 0 && text.startsWith('/'));
+  let focusedIndex = $state(0);
+
+  $effect(() => {
+    if (suggestions) {
+      focusedIndex = 0;
+    }
+  });
+
+  function applySuggestion(item) {
+    text = item.cmd;
+    if (textareaEl) {
+      textareaEl.focus();
+    }
+  }
 
   async function checkPermission() {
     if (typeof window !== 'undefined') {
@@ -201,6 +256,29 @@
   }
 
   const handleKeyDown = (e) => {
+    if (showSuggestions) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        focusedIndex = (focusedIndex + 1) % suggestions.length;
+        return;
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        focusedIndex = (focusedIndex - 1 + suggestions.length) % suggestions.length;
+        return;
+      }
+      if (e.key === 'Enter' || e.key === 'Tab') {
+        e.preventDefault();
+        applySuggestion(suggestions[focusedIndex]);
+        return;
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        text = ''; // Clear slash to dismiss suggestions
+        return;
+      }
+    }
+
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       submit();
@@ -255,6 +333,7 @@
   <div class="chat-input-container" class:listening={isRecording}>
     <div class="textarea-wrapper">
       <textarea
+        bind:this={textareaEl}
         {disabled}
         placeholder={disabled ? 'JARVIS is offline. Start the jarvis agent to begin...' : 'Send command or query to JARVIS...'}
         bind:value={text}
@@ -262,6 +341,22 @@
         class="chat-textarea"
         rows="2"
       ></textarea>
+
+      {#if showSuggestions}
+        <div class="autocomplete-popover animate-fade-in">
+          {#each suggestions as item, idx}
+            <button
+              type="button"
+              class="autocomplete-item"
+              class:focused={idx === focusedIndex}
+              onclick={() => applySuggestion(item)}
+            >
+              <span class="autocomplete-cmd">{item.cmd}</span>
+              <span class="autocomplete-desc">{item.desc}</span>
+            </button>
+          {/each}
+        </div>
+      {/if}
 
       {#if isRecording}
         <div class="listening-overlay animate-fade-in">
@@ -685,5 +780,57 @@
   @keyframes mic-pulse {
     0%, 100% { opacity: 1; }
     50% { opacity: 0.6; }
+  }
+
+  /* Autocomplete popover */
+  .autocomplete-popover {
+    position: absolute;
+    bottom: 100%;
+    left: 0;
+    width: 100%;
+    max-height: 200px;
+    overflow-y: auto;
+    background: rgba(13, 18, 34, 0.95);
+    backdrop-filter: blur(12px);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.5);
+    z-index: 20;
+    margin-bottom: 8px;
+    display: flex;
+    flex-direction: column;
+    padding: 4px;
+  }
+
+  .autocomplete-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 8px 12px;
+    background: none;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    text-align: left;
+    width: 100%;
+    color: var(--text-primary);
+    transition: all var(--transition-fast);
+  }
+
+  .autocomplete-item.focused, .autocomplete-item:hover {
+    background: rgba(0, 229, 255, 0.1);
+    color: var(--accent-cyan);
+  }
+
+  .autocomplete-cmd {
+    font-family: var(--font-mono);
+    font-size: 0.85rem;
+    font-weight: 600;
+  }
+
+  .autocomplete-desc {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
   }
 </style>
