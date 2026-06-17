@@ -75,7 +75,18 @@
     rows="2"
   ></textarea>
 
-  {#if isSttSupported}
+  {#if text.trim()}
+    <button 
+      {disabled} 
+      onclick={submit} 
+      class="send-btn"
+      class:active={true}
+    >
+      <svg viewBox="0 0 24 24" class="send-icon">
+        <path d="M2,21L23,12L2,3V10L17,12L2,14V21Z" />
+      </svg>
+    </button>
+  {:else if isSttSupported}
     <button 
       type="button"
       class="mic-btn" 
@@ -95,18 +106,16 @@
         {/if}
       </svg>
     </button>
+  {:else}
+    <button 
+      disabled
+      class="send-btn"
+    >
+      <svg viewBox="0 0 24 24" class="send-icon">
+        <path d="M2,21L23,12L2,3V10L17,12L2,14V21Z" />
+      </svg>
+    </button>
   {/if}
-
-  <button 
-    {disabled} 
-    onclick={submit} 
-    class="send-btn"
-    class:active={text.trim() && !disabled}
-  >
-    <svg viewBox="0 0 24 24" class="send-icon">
-      <path d="M2,21L23,12L2,3V10L17,12L2,14V21Z" />
-    </svg>
-  </button>
 </div>
 
 <style>
