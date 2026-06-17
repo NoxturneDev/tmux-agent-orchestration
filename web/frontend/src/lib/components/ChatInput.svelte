@@ -8,11 +8,28 @@
   let isSttSupported = $state(false);
   let recognition = null;
 
-  onMount(() => {
+  async function ensureMicPermission() {
+    if (typeof navigator === 'undefined' || !navigator.mediaDevices) return;
+    try {
+      const status = await navigator.permissions.query({ name: 'microphone' });
+      if (status.state === 'prompt') {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        stream.getTracks().forEach(track => track.stop());
+      }
+    } catch (e) {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        stream.getTracks().forEach(track => track.stop());
+      } catch (err) {}
+    }
+  }
+
+  onMount(async () => {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     isSttSupported = typeof SpeechRecognition !== 'undefined';
     
     if (isSttSupported) {
+      await ensureMicPermission();
       recognition = new SpeechRecognition();
       recognition.continuous = false;
       recognition.lang = 'en-US';

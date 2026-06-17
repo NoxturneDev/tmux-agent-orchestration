@@ -28,10 +28,27 @@
   onMount(() => {
     isTtsSupported = typeof window !== 'undefined' && 'speechSynthesis' in window;
     connectJarvis();
+
+    const unlockSpeaker = () => {
+      if (isTtsSupported) {
+        try {
+          const u = new SpeechSynthesisUtterance('');
+          u.volume = 0;
+          window.speechSynthesis.speak(u);
+        } catch (e) {}
+      }
+      window.removeEventListener('click', unlockSpeaker);
+      window.removeEventListener('keydown', unlockSpeaker);
+    };
+    window.addEventListener('click', unlockSpeaker);
+    window.addEventListener('keydown', unlockSpeaker);
+
     return () => {
       if (isTtsSupported) {
         window.speechSynthesis.cancel();
       }
+      window.removeEventListener('click', unlockSpeaker);
+      window.removeEventListener('keydown', unlockSpeaker);
       disconnectJarvis();
     };
   });
