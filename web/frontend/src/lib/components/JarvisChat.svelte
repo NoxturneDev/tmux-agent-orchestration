@@ -21,11 +21,68 @@
     }
   });
 
+  let autoSpeak = $state(false);
+  let currentlySpeakingIndex = $state(null);
+  let isTtsSupported = $state(false);
+
   onMount(() => {
+    isTtsSupported = typeof window !== 'undefined' && 'speechSynthesis' in window;
     connectJarvis();
     return () => {
+      if (isTtsSupported) {
+        window.speechSynthesis.cancel();
+      }
       disconnectJarvis();
     };
+  });
+
+  function cleanMarkdown(text) {
+    return text
+      .replace(/_[^_]+_/g, '') // remove markdown italic descriptions (e.g. interventions)
+      .replace(/`[^`]+`/g, 'code block') // simplify inline code reads
+      .replace(/[#*`~_-]/g, ' ') // strip formatting chars
+      .replace(/\s+/g, ' ') // normalize whitespace
+      .trim();
+  }
+
+  function speakMessage(text, idx) {
+    if (!isTtsSupported) return;
+
+    if (currentlySpeakingIndex === idx) {
+      window.speechSynthesis.cancel();
+      currentlySpeakingIndex = null;
+      return;
+    }
+
+    window.speechSynthesis.cancel();
+    currentlySpeakingIndex = idx;
+
+    const cleanedText = cleanMarkdown(text);
+    const utterance = new SpeechSynthesisUtterance(cleanedText);
+    
+    utterance.onend = () => {
+      if (currentlySpeakingIndex === idx) {
+        currentlySpeakingIndex = null;
+      }
+    };
+
+    utterance.onerror = () => {
+      if (currentlySpeakingIndex === idx) {
+        currentlySpeakingIndex = null;
+      }
+    };
+
+    window.speechSynthesis.speak(utterance);
+  }
+
+  // Auto-speak new messages if enabled
+  $effect(() => {
+    if (autoSpeak && jarvis.messages.length > 0) {
+      const lastMsg = jarvis.messages[jarvis.messages.length - 1];
+      if (lastMsg.sender === 'jarvis') {
+        speakMessage(lastMsg.content, jarvis.messages.length - 1);
+      }
+    }
   });
 </script>
 
@@ -36,7 +93,32 @@
         <span class="online-indicator"></span>
         <span class="meta-title">JARVIS AGENT</span>
       </div>
-      <span class="pane-badge font-mono">Pane {jarvis.paneId}</span>
+      <div class="meta-right">
+        {#if isTtsSupported}
+          <button 
+            class="tts-toggle-btn" 
+            class:active={autoSpeak} 
+            onclick={() => {
+              autoSpeak = !autoSpeak;
+              if (!autoSpeak) window.speechSynthesis.cancel();
+            }}
+            title={autoSpeak ? "Disable Auto-Speak" : "Enable Auto-Speak"}
+          >
+            <svg class="tts-icon" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+              {#if autoSpeak}
+                <path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+                <path d="M19.07 4.93a10 10 0 0 1 0 14.14"></path>
+              {:else}
+                <line x1="22" y1="9" x2="16" y2="15"></line>
+                <line x1="16" y1="9" x2="22" y2="15"></line>
+              {/if}
+            </svg>
+            <span>Auto-Speak</span>
+          </button>
+        {/if}
+        <span class="pane-badge font-mono">Pane {jarvis.paneId}</span>
+      </div>
     {:else}
       <div class="meta-left">
         <span class="offline-indicator"></span>
@@ -70,6 +152,23 @@
             <div class="msg-header">
               <span class="msg-sender">{msg.sender === 'user' ? 'You' : 'JARVIS Console'}</span>
               <span class="msg-time">{msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
+              {#if isTtsSupported && msg.sender === 'jarvis'}
+                <button 
+                  class="speak-msg-btn" 
+                  class:speaking={currentlySpeakingIndex === idx} 
+                  onclick={() => speakMessage(msg.content, idx)}
+                  title={currentlySpeakingIndex === idx ? "Stop speaking" : "Speak message"}
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    {#if currentlySpeakingIndex === idx}
+                      <rect x="4" y="4" width="16" height="16" rx="2" ry="2"></rect>
+                    {:else}
+                      <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+                      <path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+                    {/if}
+                  </svg>
+                </button>
+              {/if}
             </div>
             <div class="msg-body">
               {#if msg.sender === 'user'}
@@ -446,5 +545,68 @@
   @keyframes pulse-dot-key {
     0%, 80%, 100% { transform: scale(0.6); opacity: 0.3; }
     40% { transform: scale(1.0); opacity: 1; }
+  }
+
+  .meta-right {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .tts-toggle-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid var(--border-color);
+    color: var(--text-secondary);
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+  }
+
+  .tts-toggle-btn:hover {
+    background: rgba(0, 229, 255, 0.05);
+    border-color: rgba(0, 229, 255, 0.3);
+    color: #ffffff;
+  }
+
+  .tts-toggle-btn.active {
+    background: rgba(0, 229, 255, 0.15);
+    border-color: var(--accent-cyan);
+    color: var(--accent-cyan);
+    box-shadow: 0 0 8px rgba(0, 229, 255, 0.2);
+  }
+
+  .speak-msg-btn {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 2px;
+    border-radius: 4px;
+    transition: all var(--transition-fast);
+    margin-left: 4px;
+  }
+
+  .speak-msg-btn:hover {
+    color: var(--accent-cyan);
+    background: rgba(255, 255, 255, 0.05);
+  }
+
+  .speak-msg-btn.speaking {
+    color: var(--accent-cyan);
+    animation: bounce-scale-key 1.2s infinite ease-in-out;
+  }
+
+  @keyframes bounce-scale-key {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.15); }
   }
 </style>
