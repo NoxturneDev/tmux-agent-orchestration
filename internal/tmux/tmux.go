@@ -497,9 +497,26 @@ func IsLockDaemonAlive(dir string) bool {
 	return err == nil
 }
 
+// Helper to determine if a name is generic
+func isGenericTmuxName(name string) bool {
+	name = strings.ToLower(strings.TrimSpace(name))
+	if name == "" || name == "zsh" || name == "bash" || name == "sh" || name == "tmux" || name == "ssh" {
+		return true
+	}
+	if h, err := os.Hostname(); err == nil {
+		if name == strings.ToLower(h) {
+			return true
+		}
+	}
+	if _, err := strconv.Atoi(name); err == nil {
+		return true
+	}
+	return false
+}
+
 // ListAgentPanes queries host tmux for all running AI agent panes and silent-extracts their plans
 func ListAgentPanes() ([]AgentPane, error) {
-	cmd := exec.Command("tmux", "list-panes", "-a", "-F", "#{pane_id}|#{session_name}|#{window_id}|#{window_name}|#{pane_current_command}|#{pane_current_path}|#{pane_pid}|#{@is_agent}|#{@agent_name}|#{@plan_name}")
+	cmd := exec.Command("tmux", "list-panes", "-a", "-F", "#{pane_id}|#{session_name}|#{window_id}|#{window_name}|#{pane_current_command}|#{pane_current_path}|#{pane_pid}|#{@is_agent}|#{@agent_name}|#{@plan_name}|#{pane_title}")
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
 	err := cmd.Run()
@@ -528,6 +545,10 @@ func ListAgentPanes() ([]AgentPane, error) {
 		windowName := parts[3]
 		command := parts[4]
 		path := parts[5]
+		paneTitle := ""
+		if len(parts) >= 11 {
+			paneTitle = parts[10]
+		}
 
 		isAgent := false
 		displayCommand := command
@@ -579,6 +600,15 @@ func ListAgentPanes() ([]AgentPane, error) {
 				if planName == "" {
 					planName = findPlanNameForPane(panePID, parentToChildren, pidToArgs)
 				}
+			}
+		}
+
+		// Prioritize custom pane title or window name over generic command names
+		if displayCommand != "jarvis" {
+			if paneTitle != "" && !isGenericTmuxName(paneTitle) {
+				displayCommand = paneTitle
+			} else if windowName != "" && !isGenericTmuxName(windowName) {
+				displayCommand = windowName
 			}
 		}
 

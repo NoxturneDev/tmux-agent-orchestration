@@ -18,39 +18,104 @@
     { cmd: '/kill', desc: 'Terminate an active agent pane' },
     { cmd: '/status', desc: 'Check system status' },
     { cmd: '/intercom', desc: 'Send intercom query to another agent' },
+    { cmd: '/agents', desc: 'List active agent instances' },
     { cmd: '/clear', desc: 'Clear console logs' },
     { cmd: '/plan', desc: 'Generate or review active plans' },
     { cmd: '/help', desc: 'Show list of available commands' }
   ];
 
-  let suggestions = $derived.by(() => {
-    if (!text.startsWith('/')) return [];
+  function getActiveCommandSegment(str) {
+    for (let i = str.length - 1; i >= 0; i--) {
+      if (str[i] === '/' && (i === 0 || /\s/.test(str[i - 1]))) {
+        return {
+          index: i,
+          segment: str.slice(i)
+        };
+      }
+    }
+    return null;
+  }
 
-    const val = text.trim();
+  let hiddenSegment = $state('');
+
+  let suggestions = $derived.by(() => {
+    const active = getActiveCommandSegment(text);
+    if (!active) return [];
+
+    const val = active.segment;
+    if (val === hiddenSegment) return [];
+
     if (val === '/') {
       return BASE_COMMANDS;
     }
 
-    if (val.startsWith('/kill ')) {
+    if (val === '/kill' || val.startsWith('/kill ')) {
+      const targetNames = fleet.panes.map(p => p.Command || p.PaneID).filter(Boolean);
       const paneSuggestions = fleet.panes.map(p => ({
         cmd: `/kill ${p.Command || p.PaneID}`,
-        desc: `Kill ${p.Command} (Pane ${p.PaneID})`
+        desc: `Kill ${p.Command || p.PaneID} (Pane ${p.PaneID})`
       }));
+      if (val === '/kill' || val === '/kill ') {
+        return paneSuggestions;
+      }
+      const query = val.slice(6).toLowerCase();
+      const trimmedQuery = query.trim();
+      const targetNamesLower = targetNames.map(name => name.toLowerCase());
+      if (trimmedQuery.includes(' ') || (query.endsWith(' ') && targetNamesLower.includes(trimmedQuery))) {
+        return [];
+      }
       return paneSuggestions.filter(s => s.cmd.toLowerCase().includes(val.toLowerCase()));
     }
 
-    if (val.startsWith('/intercom ')) {
+    if (val === '/intercom' || val.startsWith('/intercom ')) {
+      const targetNames = fleet.panes.map(p => p.Command || p.PaneID).filter(Boolean);
       const paneSuggestions = fleet.panes.map(p => ({
         cmd: `/intercom ${p.Command || p.PaneID} `,
-        desc: `Send intercom message to ${p.Command}`
+        desc: `Send intercom message to ${p.Command || p.PaneID}`
       }));
+      if (val === '/intercom' || val === '/intercom ') {
+        return paneSuggestions;
+      }
+      const query = val.slice(10).toLowerCase();
+      const trimmedQuery = query.trim();
+      const targetNamesLower = targetNames.map(name => name.toLowerCase());
+      if (trimmedQuery.includes(' ') || (query.endsWith(' ') && targetNamesLower.includes(trimmedQuery))) {
+        return [];
+      }
       return paneSuggestions.filter(s => s.cmd.toLowerCase().includes(val.toLowerCase()));
+    }
+
+    if (val === '/agents' || val.startsWith('/agents ')) {
+      const targetNames = fleet.panes.map(p => p.Command || p.PaneID).filter(Boolean);
+      const uniqueCommands = Array.from(new Set(targetNames));
+      const paneSuggestions = uniqueCommands.map(cmd => ({
+        cmd: `/intercom ${cmd} `,
+        desc: `Active agent: ${cmd}`
+      }));
+      fleet.panes.forEach(p => {
+        if (!p.Command && p.PaneID) {
+          paneSuggestions.push({
+            cmd: `/intercom ${p.PaneID} `,
+            desc: `Active pane: ${p.PaneID}`
+          });
+        }
+      });
+      if (val === '/agents' || val === '/agents ') {
+        return paneSuggestions;
+      }
+      const query = val.slice(8).toLowerCase();
+      const trimmedQuery = query.trim();
+      const targetNamesLower = targetNames.map(name => name.toLowerCase());
+      if (trimmedQuery.includes(' ') || (query.endsWith(' ') && targetNamesLower.includes(trimmedQuery))) {
+        return [];
+      }
+      return paneSuggestions.filter(s => s.cmd.toLowerCase().includes(`/intercom ${query}`));
     }
 
     return BASE_COMMANDS.filter(s => s.cmd.toLowerCase().startsWith(val.toLowerCase()));
   });
 
-  let showSuggestions = $derived(suggestions.length > 0 && text.startsWith('/'));
+  let showSuggestions = $derived(suggestions.length > 0 && getActiveCommandSegment(text) !== null);
   let focusedIndex = $state(0);
 
   $effect(() => {
@@ -59,8 +124,25 @@
     }
   });
 
+  $effect(() => {
+    const active = getActiveCommandSegment(text);
+    if (!active || active.segment !== hiddenSegment) {
+      hiddenSegment = '';
+    }
+  });
+
   function applySuggestion(item) {
-    text = item.cmd;
+    const active = getActiveCommandSegment(text);
+    if (active) {
+      text = text.slice(0, active.index) + item.cmd;
+    } else {
+      text = item.cmd;
+    }
+
+    if (item.cmd !== '/agents' && item.cmd !== '/kill' && item.cmd !== '/intercom') {
+      hiddenSegment = item.cmd;
+    }
+
     if (textareaEl) {
       textareaEl.focus();
     }
@@ -267,14 +349,17 @@
         focusedIndex = (focusedIndex - 1 + suggestions.length) % suggestions.length;
         return;
       }
-      if (e.key === 'Enter' || e.key === 'Tab') {
+      if (e.key === 'Tab') {
         e.preventDefault();
         applySuggestion(suggestions[focusedIndex]);
         return;
       }
       if (e.key === 'Escape') {
         e.preventDefault();
-        text = ''; // Clear slash to dismiss suggestions
+        const active = getActiveCommandSegment(text);
+        if (active) {
+          hiddenSegment = active.segment;
+        }
         return;
       }
     }
