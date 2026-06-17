@@ -25,13 +25,11 @@
   ];
 
   function getActiveCommandSegment(str) {
-    for (let i = str.length - 1; i >= 0; i--) {
-      if (str[i] === '/' && (i === 0 || /\s/.test(str[i - 1]))) {
-        return {
-          index: i,
-          segment: str.slice(i)
-        };
-      }
+    if (str.startsWith('/')) {
+      return {
+        index: 0,
+        segment: str
+      };
     }
     return null;
   }

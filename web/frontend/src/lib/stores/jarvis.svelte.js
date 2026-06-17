@@ -1,5 +1,18 @@
 let status = $state('disconnected');
-let messages = $state([]);
+
+let cachedMessages = [];
+if (typeof localStorage !== 'undefined') {
+  try {
+    const cached = JSON.parse(localStorage.getItem('jarvis_chat_history') || '[]');
+    cachedMessages = cached.map(m => ({
+      sender: m.sender,
+      content: m.content,
+      timestamp: new Date(m.timestamp)
+    }));
+  } catch (e) {}
+}
+
+let messages = $state(cachedMessages);
 let paneId = $state('');
 let isThinking = $state(false);
 
@@ -15,6 +28,17 @@ let reconnectTimeout = null;
 let reconnectDelay = 1000;
 
 export function connectJarvis() {
+  if (messages.length === 0 && typeof localStorage !== 'undefined') {
+    try {
+      const cached = JSON.parse(localStorage.getItem('jarvis_chat_history') || '[]');
+      messages = cached.map(m => ({
+        sender: m.sender,
+        content: m.content,
+        timestamp: new Date(m.timestamp)
+      }));
+    } catch (e) {}
+  }
+
   if (ws) return;
 
   status = 'connecting';
@@ -27,6 +51,8 @@ export function connectJarvis() {
   ws.onopen = () => {
     status = 'connected';
     reconnectDelay = 1000;
+    // Clear the active messages before receiving the fresh history stream from server
+    messages = [];
   };
 
   ws.onmessage = (event) => {
@@ -53,6 +79,10 @@ export function connectJarvis() {
             timestamp: new Date(msg.timestamp)
           }
         ];
+
+        if (typeof localStorage !== 'undefined') {
+          localStorage.setItem('jarvis_chat_history', JSON.stringify(messages));
+        }
         
         // Update thinking state based on who sent the last message
         if (msg.sender === 'jarvis') {
