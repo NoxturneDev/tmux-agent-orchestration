@@ -273,15 +273,23 @@ func handleJarvisWS(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if msg.Type == "intervene" {
-			// Send C-c to Jarvis pane
-			_ = exec.Command("tmux", "send-keys", "-t", paneID, "C-c").Run()
+			// Send stop signal to Jarvis pane: Escape if opencode is running, C-c otherwise
+			if tmux.IsPaneRunningOpencode(paneID) {
+				_ = exec.Command("tmux", "send-keys", "-t", paneID, "Escape").Run()
+			} else {
+				_ = exec.Command("tmux", "send-keys", "-t", paneID, "C-c").Run()
+			}
 
-			// Send C-c to all active worker agent panes
+			// Send stop signal to all active worker agent panes
 			panes, err := tmux.ListAgentPanes()
 			if err == nil {
 				for _, p := range panes {
 					if p.PaneID != paneID {
-						_ = exec.Command("tmux", "send-keys", "-t", p.PaneID, "C-c").Run()
+						if tmux.IsPaneRunningOpencode(p.PaneID) {
+							_ = exec.Command("tmux", "send-keys", "-t", p.PaneID, "Escape").Run()
+						} else {
+							_ = exec.Command("tmux", "send-keys", "-t", p.PaneID, "C-c").Run()
+						}
 					}
 				}
 			}
@@ -297,7 +305,9 @@ func handleJarvisWS(w http.ResponseWriter, r *http.Request) {
 			// Save the user's message in the API proxy store
 			AddJarvisMessage("user", msg.Content)
 
-			err := tmux.InjectPromptViaBuffer(paneID, msg.Content)
+			// Append context injection so Jarvis knows to always mirror response
+			injectedContent := msg.Content + "\n\n[Source: Web Chat - Mirror response to API endpoint]"
+			err := tmux.InjectPromptViaBuffer(paneID, injectedContent)
 			if err != nil {
 				log.Printf("WS error injecting prompt to pane %s: %v", paneID, err)
 			}
