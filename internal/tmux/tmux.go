@@ -834,4 +834,50 @@ func StopPipePane(paneID string) error {
 	return cmd.Run()
 }
 
+// IsPaneRunningOpencode checks if the tmux pane is running the opencode process
+func IsPaneRunningOpencode(paneID string) bool {
+	if paneID == "" {
+		return false
+	}
+	cmd := exec.Command("tmux", "display-message", "-p", "-t", paneID, "#{pane_pid}")
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+	if err := cmd.Run(); err != nil {
+		return false
+	}
+	pidStr := strings.TrimSpace(stdout.String())
+	panePID, err := strconv.Atoi(pidStr)
+	if err != nil {
+		return false
+	}
+
+	parentToChildren, pidToComm, pidToArgs := buildPidTree()
+	
+	queue := []int{panePID}
+	visited := make(map[int]bool)
+
+	for len(queue) > 0 {
+		curr := queue[0]
+		queue = queue[1:]
+
+		if visited[curr] {
+			continue
+		}
+		visited[curr] = true
+
+		comm := pidToComm[curr]
+		args := pidToArgs[curr]
+		if strings.Contains(comm, "opencode") || strings.Contains(args, "opencode") {
+			return true
+		}
+
+		if children, ok := parentToChildren[curr]; ok {
+			queue = append(queue, children...)
+		}
+	}
+
+	return false
+}
+
+
 
