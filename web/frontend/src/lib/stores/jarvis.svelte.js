@@ -44,20 +44,29 @@ export function connectJarvis() {
   status = 'connecting';
   
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const wsUrl = `${protocol}//${window.location.host}/ws/jarvis`;
+  let wsUrl = `${protocol}//${window.location.host}/ws/jarvis`;
+  if (messages.length > 0) {
+    const lastMsg = messages[messages.length - 1];
+    if (lastMsg && lastMsg.timestamp) {
+      const isoStr = lastMsg.timestamp instanceof Date ? lastMsg.timestamp.toISOString() : new Date(lastMsg.timestamp).toISOString();
+      wsUrl += `?since=${encodeURIComponent(isoStr)}`;
+    }
+  }
   
   ws = new WebSocket(wsUrl);
 
   ws.onopen = () => {
     status = 'connected';
     reconnectDelay = 1000;
-    // Clear the active messages before receiving the fresh history stream from server
-    messages = [];
   };
 
   ws.onmessage = (event) => {
     try {
       const data = JSON.parse(event.data);
+      if (data.type === 'history_clear') {
+        messages = [];
+        return;
+      }
       if (data.type === 'status') {
         if (data.status === 'offline') {
           status = 'offline';
