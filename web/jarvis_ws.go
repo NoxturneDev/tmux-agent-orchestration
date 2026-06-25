@@ -241,10 +241,40 @@ func handleJarvisWS(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	// Send current chat history immediately to the client
+	// Send current chat history or delta immediately to the client
+	sinceStr := r.URL.Query().Get("since")
+	var sinceTime time.Time
+	var hasSince bool
+	if sinceStr != "" {
+		if t, err := time.Parse(time.RFC3339, sinceStr); err == nil {
+			sinceTime = t
+			hasSince = true
+		}
+	}
+
+	startIndex := -1
 	jarvisMessagesMu.RLock()
-	for _, msg := range jarvisMessages {
-		clientChan <- msg
+	if hasSince {
+		for i, msg := range jarvisMessages {
+			if msg.Timestamp.UnixMilli() == sinceTime.UnixMilli() {
+				startIndex = i + 1
+				break
+			}
+		}
+	}
+
+	if startIndex == -1 {
+		// Timestamp not found or not provided; clear client history
+		writeMu.Lock()
+		_ = conn.WriteJSON(wsResponse{
+			Type: "history_clear",
+		})
+		writeMu.Unlock()
+		startIndex = 0
+	}
+
+	for i := startIndex; i < len(jarvisMessages); i++ {
+		clientChan <- jarvisMessages[i]
 	}
 	jarvisMessagesMu.RUnlock()
 
