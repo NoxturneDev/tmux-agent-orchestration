@@ -28,11 +28,19 @@ type AntigravityModelQuota struct {
 }
 
 type AntigravityQuotaSnapshot struct {
-	Timestamp     string                  `json:"timestamp"`
-	Method        string                  `json:"method"`
-	Email         string                  `json:"email"`
-	Models        []AntigravityModelQuota `json:"models"`
+	Timestamp     string                    `json:"timestamp"`
+	Method        string                    `json:"method"`
+	Email         string                    `json:"email"`
+	Models        []AntigravityModelQuota   `json:"models"`
 	PromptCredits *AntigravityPromptCredits `json:"promptCredits,omitempty"`
+}
+
+// Wrapper struct matching the actual API response format
+type AntigravityAccountAPIResponse struct {
+	Email    string                    `json:"email"`
+	IsActive bool                      `json:"isActive"`
+	Status   string                    `json:"status"`
+	Snapshot *AntigravityQuotaSnapshot `json:"snapshot,omitempty"`
 }
 
 type AccountQuotaResponse struct {
@@ -95,8 +103,11 @@ func loadAllQuotas() {
 }
 
 func fetchAccountQuota(homeDir string) (*AntigravityQuotaSnapshot, error) {
-	cmd := exec.Command("antigravity-usage", "quota", "--json", "--all")
-	cmd.Env = append(os.Environ(), "HOME="+homeDir)
+	cmd := exec.Command("/home/noxturne/.nvm/versions/node/v22.21.1/bin/antigravity-usage", "quota", "--json", "--all")
+	cmd.Env = append(os.Environ(),
+		"HOME="+homeDir,
+		"PATH=/home/noxturne/.nvm/versions/node/v22.21.1/bin:/usr/local/bin:/usr/bin:/bin",
+	)
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -111,12 +122,21 @@ func fetchAccountQuota(homeDir string) (*AntigravityQuotaSnapshot, error) {
 		return nil, &runError{Msg: errMsg}
 	}
 
-	var snapshot AntigravityQuotaSnapshot
-	if err := json.Unmarshal(stdout.Bytes(), &snapshot); err != nil {
+	var apiResponses []AntigravityAccountAPIResponse
+	if err := json.Unmarshal(stdout.Bytes(), &apiResponses); err != nil {
 		return nil, err
 	}
 
-	return &snapshot, nil
+	if len(apiResponses) == 0 {
+		return nil, &runError{Msg: "No quota data returned"}
+	}
+
+	// Return the snapshot from the first account
+	if apiResponses[0].Snapshot == nil {
+		return nil, &runError{Msg: "No snapshot data in response"}
+	}
+
+	return apiResponses[0].Snapshot, nil
 }
 
 type runError struct {
