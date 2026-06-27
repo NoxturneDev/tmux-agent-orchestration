@@ -18,6 +18,8 @@ func StartServer(port int) error {
 	mux.HandleFunc("GET /api/pane/{id}/raw", handlePaneRaw)
 	mux.HandleFunc("POST /api/pane/{id}/kill", handlePaneKill)
 	mux.HandleFunc("POST /api/jarvis/response", handleJarvisResponse)
+	mux.HandleFunc("GET /api/claude/stats", handleClaudeStats)
+	mux.HandleFunc("GET /api/antigravity/quota", handleAntigravityQuota)
 
 	// WebSocket Endpoint
 	mux.HandleFunc("GET /ws/jarvis", handleJarvisWS)
