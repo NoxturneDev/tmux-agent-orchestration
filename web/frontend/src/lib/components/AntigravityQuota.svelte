@@ -212,7 +212,7 @@
 
   .account-header {
     display: flex;
-    justify-content: justify;
+    justify-content: space-between;
     align-items: flex-start;
     border-bottom: 1px solid var(--border-color);
     padding-bottom: 12px;
@@ -316,7 +316,7 @@
 
   .progress-details {
     display: flex;
-    justify-content: justify;
+    justify-content: space-between;
     font-size: 0.8rem;
     color: #ffffff;
     margin-bottom: 6px;
@@ -381,7 +381,7 @@
 
   .model-info {
     display: flex;
-    justify-content: justify;
+    justify-content: space-between;
     align-items: center;
   }
 
