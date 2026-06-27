@@ -4,8 +4,11 @@
   import { jarvis } from './lib/stores/jarvis.svelte.js';
   import FleetRadar from './lib/components/FleetRadar.svelte';
   import JarvisChat from './lib/components/JarvisChat.svelte';
+  import ClaudeUsage from './lib/components/ClaudeUsage.svelte';
+  import AntigravityQuota from './lib/components/AntigravityQuota.svelte';
 
-  let activeTab = $state('chat'); // 'chat' or 'radar'
+  let activeTab = $state('chat'); // 'chat', 'radar', 'usage', or 'quota'
+  let activeLeftTab = $state('radar'); // 'radar', 'usage', or 'quota'
 
   onMount(() => {
     connectFleet();
@@ -19,13 +22,37 @@
 
 
   <main class="app-body">
-    <section class="panel-left glass-panel" class:mobile-hidden={activeTab !== 'radar'}>
-      <div class="panel-header">
-        <h2>Fleet Radar</h2>
-        <span class="panel-subtitle">Live agent panes monitoring</span>
+    <section class="panel-left glass-panel" class:mobile-hidden={activeTab === 'chat'}>
+      <div class="panel-header tabbed-header">
+        <div class="tabs-container">
+          <button class="panel-tab-btn" class:active={activeLeftTab === 'radar'} onclick={() => { activeLeftTab = 'radar'; activeTab = 'radar'; }}>
+            Fleet Radar
+          </button>
+          <button class="panel-tab-btn" class:active={activeLeftTab === 'usage'} onclick={() => { activeLeftTab = 'usage'; activeTab = 'usage'; }}>
+            Claude Usage
+          </button>
+          <button class="panel-tab-btn" class:active={activeLeftTab === 'quota'} onclick={() => { activeLeftTab = 'quota'; activeTab = 'quota'; }}>
+            Antigravity Quota
+          </button>
+        </div>
+        <span class="panel-subtitle">
+          {#if activeLeftTab === 'radar'}
+            Live agent panes monitoring
+          {:else if activeLeftTab === 'usage'}
+            Claude Code token and cost statistics
+          {:else}
+            Multi-profile Antigravity credits & API remaining quotas
+          {/if}
+        </span>
       </div>
       <div class="panel-content">
-        <FleetRadar />
+        {#if activeLeftTab === 'radar'}
+          <FleetRadar />
+        {:else if activeLeftTab === 'usage'}
+          <ClaudeUsage />
+        {:else}
+          <AntigravityQuota />
+        {/if}
       </div>
     </section>
 
@@ -42,7 +69,7 @@
 
   <!-- Mobile Tab Bar navigation -->
   <div class="mobile-tab-bar">
-    <button class="tab-btn" class:active={activeTab === 'radar'} onclick={() => activeTab = 'radar'}>
+    <button class="tab-btn" class:active={activeTab === 'radar'} onclick={() => { activeTab = 'radar'; activeLeftTab = 'radar'; }}>
       <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="tab-svg">
         <circle cx="12" cy="12" r="10"/>
         <path d="M12 12m-6 0a6 6 0 1 0 12 0a6 6 0 1 0 -12 0"/>
@@ -50,6 +77,20 @@
         <line x1="12" y1="2" x2="12" y2="12"/>
       </svg>
       <span>Fleet Radar</span>
+    </button>
+    <button class="tab-btn" class:active={activeTab === 'usage'} onclick={() => { activeTab = 'usage'; activeLeftTab = 'usage'; }}>
+      <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="tab-svg">
+        <line x1="18" y1="20" x2="18" y2="10"/>
+        <line x1="12" y1="20" x2="12" y2="4"/>
+        <line x1="6" y1="20" x2="6" y2="14"/>
+      </svg>
+      <span>Usage</span>
+    </button>
+    <button class="tab-btn" class:active={activeTab === 'quota'} onclick={() => { activeTab = 'quota'; activeLeftTab = 'quota'; }}>
+      <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="tab-svg">
+        <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
+      </svg>
+      <span>Quota</span>
     </button>
     <button class="tab-btn" class:active={activeTab === 'chat'} onclick={() => activeTab = 'chat'}>
       <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="tab-svg">
@@ -183,5 +224,42 @@
 
   .tab-btn.active .tab-svg {
     transform: scale(1.1);
+  }
+
+  .tabbed-header {
+    padding: 12px 20px 8px 20px !important;
+  }
+
+  .tabs-container {
+    display: flex;
+    gap: 20px;
+    margin-bottom: 4px;
+  }
+
+  .panel-tab-btn {
+    background: none;
+    border: none;
+    padding: 4px 0;
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    cursor: pointer;
+    position: relative;
+    transition: color var(--transition-fast);
+  }
+
+  .panel-tab-btn.active {
+    color: #ffffff;
+  }
+
+  .panel-tab-btn.active::after {
+    content: '';
+    position: absolute;
+    bottom: -9px;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: var(--accent-cyan);
+    box-shadow: 0 0 8px var(--accent-cyan);
   }
 </style>
