@@ -35,6 +35,7 @@ var Agents = []AgentConfig{
 	{Name: "agy-p2", Command: "mkdir -p ~/.antigravity-work && HOME=$HOME/.antigravity-work agy"},
 	{Name: "gemini-p2", Command: "mkdir -p ~/.gemini-work && HOME=$HOME/.gemini-work gemini"},
 	{Name: "opencode", Command: "opencode"},
+	{Name: "claude", Command: "claude"},
 }
 
 // AgentPane holds parsed host tmux pane metadata for Mission Control (AI Fleet Radar)
