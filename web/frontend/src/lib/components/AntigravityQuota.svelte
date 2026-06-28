@@ -2,10 +2,55 @@
   import { onMount } from 'svelte';
   import { quota, fetchQuotaData } from '../stores/quota.svelte.js';
 
+  let countdowns = $state({});
+
   onMount(() => {
     fetchQuotaData();
-    const interval = setInterval(fetchQuotaData, 30000); // refresh every 30s
-    return () => clearInterval(interval);
+    const apiInterval = setInterval(fetchQuotaData, 30000); // refresh API every 30s
+    
+    // Local ticking countdown (every 1 second)
+    const tickInterval = setInterval(() => {
+      let updatedCountdowns = { ...countdowns };
+      let ticked = false;
+      
+      if (quota.data && quota.data.accounts) {
+        quota.data.accounts.forEach(acc => {
+          if (acc.quota && acc.quota.models) {
+            acc.quota.models.forEach(m => {
+              const key = `${acc.accountName}-${m.modelId}`;
+              if (updatedCountdowns[key] !== undefined) {
+                updatedCountdowns[key] = Math.max(0, updatedCountdowns[key] - 1000);
+                ticked = true;
+              }
+            });
+          }
+        });
+      }
+      if (ticked) {
+        countdowns = updatedCountdowns;
+      }
+    }, 1000);
+
+    return () => {
+      clearInterval(apiInterval);
+      clearInterval(tickInterval);
+    };
+  });
+
+  // Sync local countdowns with fresh API loads
+  $effect(() => {
+    if (quota.data && quota.data.accounts) {
+      let freshCountdowns = {};
+      quota.data.accounts.forEach(acc => {
+        if (acc.quota && acc.quota.models) {
+          acc.quota.models.forEach(m => {
+            const key = `${acc.accountName}-${m.modelId}`;
+            freshCountdowns[key] = m.timeUntilResetMs || 0;
+          });
+        }
+      });
+      countdowns = freshCountdowns;
+    }
   });
 
   const getPercentageText = (fraction) => {
@@ -31,8 +76,11 @@
     if (ms === undefined || ms === null || ms <= 0) return 'N/A';
     const hours = Math.floor(ms / (1000 * 60 * 60));
     const minutes = Math.floor((ms % (1000 * 60 * 60)) / (1000 * 60));
+    const seconds = Math.floor((ms % (1000 * 60)) / 1000);
+    
     if (hours > 0) return `${hours}h ${minutes}m`;
-    return `${minutes}m`;
+    if (minutes > 0) return `${minutes}m ${seconds}s`;
+    return `${seconds}s`;
   };
 </script>
 
@@ -104,10 +152,13 @@
                 <div class="models-list">
                   {#each acc.quota.models as m}
                     {#if !m.isAutocompleteOnly}
+                      {@const countdownKey = `${acc.accountName}-${m.modelId}`}
                       <div class="model-row">
                         <div class="model-info">
                           <span class="model-name font-mono">{m.label}</span>
-                          <span class="reset-time font-mono">Resets in: {formatTimeUntilReset(m.timeUntilResetMs)}</span>
+                          <span class="reset-time font-mono" class:low-quota={m.remainingPercentage < 0.15 || m.isExhausted}>
+                            Resets: {formatTimeUntilReset(countdowns[countdownKey])}
+                          </span>
                         </div>
                         <div class="model-progress-group">
                           <div class="progress-details">

@@ -5,7 +5,8 @@ let error = $state(null);
 export const quota = {
   get data() { return quotaData; },
   get loading() { return loading; },
-  get error() { return error; }
+  get error() { return error; },
+  refresh() { return fetchQuotaData(); }
 };
 
 export async function fetchQuotaData() {
@@ -22,3 +23,12 @@ export async function fetchQuotaData() {
     loading = false;
   }
 }
+
+if (typeof document !== 'undefined') {
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      fetchQuotaData();
+    }
+  });
+}
+

@@ -76,6 +76,42 @@
     if (dailyData.length === 0) return 1;
     return Math.max(...dailyData.map((d) => d.messageCount), 1);
   });
+
+  // Determine rate limits based on standard Claude Code quotas
+  const getRateLimitData = (model) => {
+    let limit5h = 4_000_000;
+    let limitWeekly = 20_000_000;
+
+    if (model.includes('haiku')) {
+      limit5h = 10_000_000;
+      limitWeekly = 50_000_000;
+    } else if (model.includes('opus')) {
+      limit5h = 2_000_000;
+      limitWeekly = 10_000_000;
+    } else if (model.includes('sonnet')) {
+      limit5h = 4_000_000;
+      limitWeekly = 20_000_000;
+    }
+
+    const hourly = usage.stats?.hourlyUsage?.[model] || 0;
+    const weekly = usage.stats?.weeklyUsage?.[model] || 0;
+
+    return {
+      hourly,
+      limit5h,
+      hourlyPct: Math.min((hourly / limit5h) * 100, 100),
+      weekly,
+      limitWeekly,
+      weeklyPct: Math.min((weekly / limitWeekly) * 100, 100)
+    };
+  };
+
+  let lastRefreshed = $state('');
+  $effect(() => {
+    if (usage.stats) {
+      lastRefreshed = new Date().toLocaleTimeString();
+    }
+  });
 </script>
 
 <div class="usage-container">
@@ -118,6 +154,56 @@
         <span class="metric-title">CACHE EFFICIENCY</span>
         <span class="metric-val text-cyan">{aggregates.cacheEfficiency.toFixed(1)}%</span>
         <span class="metric-desc">Saved: {formatNum(aggregates.totalCacheRead)} read tokens</span>
+      </div>
+    </div>
+
+    <!-- Rate Limits Panel -->
+    <div class="section-card glass-panel">
+      <div class="section-header flex-header">
+        <h3>Claude Code Rolling Rate Limits</h3>
+        <span class="refresh-time font-mono">Refreshed: {lastRefreshed}</span>
+      </div>
+      <div class="rate-limits-grid">
+        {#each Object.keys(usage.stats.modelUsage) as model}
+          {@const limits = getRateLimitData(model)}
+          <div class="limit-model-card">
+            <span class="model-name font-mono">{model}</span>
+            
+            <!-- 5-hour limit -->
+            <div class="limit-bar-group">
+              <div class="limit-details">
+                <span class="limit-label">5-Hour Window Usage</span>
+                <span class="limit-values font-mono">
+                  {formatNum(limits.hourly)} / {formatNum(limits.limit5h)}
+                </span>
+              </div>
+              <div class="limit-track">
+                <div 
+                  class="limit-bar" 
+                  class:warning={limits.hourlyPct > 80} 
+                  style="width: {limits.hourlyPct}%"
+                ></div>
+              </div>
+            </div>
+
+            <!-- Weekly limit -->
+            <div class="limit-bar-group">
+              <div class="limit-details">
+                <span class="limit-label">Weekly Usage (Mon-Sun)</span>
+                <span class="limit-values font-mono">
+                  {formatNum(limits.weekly)} / {formatNum(limits.limitWeekly)}
+                </span>
+              </div>
+              <div class="limit-track">
+                <div 
+                  class="limit-bar" 
+                  class:warning={limits.weeklyPct > 80} 
+                  style="width: {limits.weeklyPct}%"
+                ></div>
+              </div>
+            </div>
+          </div>
+        {/each}
       </div>
     </div>
 
@@ -344,6 +430,79 @@
     font-size: 1rem;
     font-weight: 600;
     color: #ffffff;
+  }
+
+  .flex-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .refresh-time {
+    font-size: 0.75rem;
+    color: var(--text-muted, #728aa1);
+  }
+
+  .rate-limits-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+
+  @media (min-width: 768px) {
+    .rate-limits-grid {
+      grid-template-columns: 1fr 1fr;
+    }
+  }
+
+  .limit-model-card {
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.03);
+    border-radius: 6px;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .limit-bar-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .limit-details {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.75rem;
+  }
+
+  .limit-label {
+    color: var(--text-secondary);
+  }
+
+  .limit-values {
+    color: #ffffff;
+    font-weight: 600;
+  }
+
+  .limit-track {
+    height: 6px;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 3px;
+    overflow: hidden;
+  }
+
+  .limit-bar {
+    height: 100%;
+    background: var(--accent-cyan);
+    border-radius: 3px;
+    transition: width 0.3s ease;
+  }
+
+  .limit-bar.warning {
+    background: #ef4444;
+    box-shadow: 0 0 8px rgba(239, 68, 68, 0.3);
   }
 
   .chart-wrapper {

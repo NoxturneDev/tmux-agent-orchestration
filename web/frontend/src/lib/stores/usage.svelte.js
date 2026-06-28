@@ -5,7 +5,8 @@ let error = $state(null);
 export const usage = {
   get stats() { return stats; },
   get loading() { return loading; },
-  get error() { return error; }
+  get error() { return error; },
+  refresh() { return fetchUsageStats(); }
 };
 
 export async function fetchUsageStats() {
@@ -22,3 +23,12 @@ export async function fetchUsageStats() {
     loading = false;
   }
 }
+
+if (typeof document !== 'undefined') {
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      fetchUsageStats();
+    }
+  });
+}
+
