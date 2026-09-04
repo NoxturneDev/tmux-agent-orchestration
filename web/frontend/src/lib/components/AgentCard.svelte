@@ -79,7 +79,6 @@
   .agent-card:hover {
     transform: translateY(-2px);
     border-color: var(--accent-cyan);
-    box-shadow: 0 4px 20px rgba(0, 229, 255, 0.15);
   }
 
   .card-header {
@@ -193,13 +192,11 @@
 
   .in-progress .status-dot {
     background-color: var(--accent-cyan);
-    box-shadow: 0 0 8px var(--accent-cyan);
     animation: pulse 2s infinite ease-in-out;
   }
 
   .idle .status-dot {
     background-color: #757575;
-    box-shadow: 0 0 4px rgba(117, 117, 117, 0.4);
   }
 
   .status-text {

@@ -502,7 +502,6 @@
 
   .limit-bar.warning {
     background: #ef4444;
-    box-shadow: 0 0 8px rgba(239, 68, 68, 0.3);
   }
 
   .chart-wrapper {

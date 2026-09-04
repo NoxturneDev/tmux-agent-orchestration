@@ -396,22 +396,18 @@
 
   .progress-green {
     background: #10b981;
-    box-shadow: 0 0 8px rgba(16, 185, 129, 0.3);
   }
 
   .progress-yellow {
     background: #fbbf24;
-    box-shadow: 0 0 8px rgba(251, 191, 36, 0.3);
   }
 
   .progress-orange {
     background: #f97316;
-    box-shadow: 0 0 8px rgba(249, 115, 22, 0.3);
   }
 
   .progress-red {
     background: #ef4444;
-    box-shadow: 0 0 8px rgba(239, 68, 68, 0.3);
   }
 
   .models-list {

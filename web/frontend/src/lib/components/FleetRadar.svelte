@@ -114,7 +114,6 @@
 
   .search-input:focus {
     border-color: var(--accent-cyan);
-    box-shadow: 0 0 10px rgba(0, 229, 255, 0.1);
     background: rgba(255, 255, 255, 0.05);
   }
 
@@ -153,7 +152,6 @@
     height: 10px;
     background: var(--accent-cyan);
     border-radius: 50%;
-    box-shadow: 0 0 8px var(--accent-cyan);
     position: relative;
   }
 

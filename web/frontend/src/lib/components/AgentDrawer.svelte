@@ -132,7 +132,6 @@
     width: 100vw;
     height: 100vh;
     background: rgba(0, 0, 0, 0.6);
-    backdrop-filter: blur(4px);
     z-index: 1000;
     display: flex;
     justify-content: flex-end;
@@ -144,7 +143,6 @@
     height: 100%;
     background: var(--bg-secondary);
     border-left: 1px solid var(--border-color);
-    box-shadow: -10px 0 30px rgba(0, 0, 0, 0.5);
     display: flex;
     flex-direction: column;
     animation: slideInRight var(--transition-normal) forwards;
@@ -337,14 +335,13 @@
   }
 
   .btn-primary {
-    background: linear-gradient(135deg, var(--accent-cyan), var(--accent-blue));
+    background: var(--accent-cyan);
     border: none;
     color: #000;
   }
 
   .btn-primary:hover:not(:disabled) {
-    box-shadow: var(--shadow-glow);
-    transform: translateY(-1px);
+    opacity: 0.85;
   }
 
   .btn-primary:disabled {
@@ -353,14 +350,13 @@
   }
 
   .btn-danger {
-    background: linear-gradient(135deg, #ff1744, #d50000);
+    background: #d50000;
     border: none;
     color: #ffffff;
   }
 
   .btn-danger:hover:not(:disabled) {
-    box-shadow: 0 0 15px rgba(255, 23, 68, 0.4);
-    transform: translateY(-1px);
+    opacity: 0.85;
   }
 
   .spacer {

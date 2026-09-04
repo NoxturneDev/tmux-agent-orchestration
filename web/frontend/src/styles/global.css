@@ -1,33 +1,36 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap');
 
 :root {
-  --bg-primary: #070a13;
-  --bg-secondary: #0d1222;
-  --bg-glass: rgba(13, 18, 34, 0.7);
-  --bg-glass-hover: rgba(20, 27, 49, 0.85);
-  --border-color: rgba(0, 229, 255, 0.15);
-  --border-hover: rgba(0, 229, 255, 0.4);
-  
+  /* Flat terminal theme — solid backgrounds, thin neutral borders, no
+     blur/glow/gradient. Variable names kept stable so every component
+     that already reads them updates automatically. */
+  --bg-primary: #0b0d12;
+  --bg-secondary: #12151c;
+  --bg-glass: #12151c;
+  --bg-glass-hover: #171b24;
+  --border-color: #262b36;
+  --border-hover: #3a4150;
+
   --accent-cyan: #00e5ff;
   --accent-blue: #2979ff;
   --accent-purple: #d500f9;
-  
-  --text-primary: #f0f4f9;
-  --text-secondary: #90a4ae;
-  --text-muted: #607d8b;
+
+  --text-primary: #e6e9ef;
+  --text-secondary: #8b93a3;
+  --text-muted: #5c6474;
   --text-accent: #00e5ff;
-  
-  --terminal-bg: #03060f;
-  --terminal-border: rgba(0, 229, 255, 0.1);
-  
-  --shadow-glow: 0 0 15px rgba(0, 229, 255, 0.15);
-  --shadow-glow-strong: 0 0 25px rgba(0, 229, 255, 0.3);
-  
+
+  --terminal-bg: #0b0d12;
+  --terminal-border: #1c2029;
+
+  --shadow-glow: none;
+  --shadow-glow-strong: none;
+
   --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
-  
-  --transition-fast: 0.15s ease;
-  --transition-normal: 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+
+  --transition-fast: 0.1s ease;
+  --transition-normal: 0.15s ease;
 }
 
 * {
@@ -50,20 +53,20 @@ body {
   font-family: var(--font-sans);
 }
 
-/* Glassmorphism utility */
+h1, h2, h3, h4, h5, h6, button, label, .panel-tab-btn, .tab-btn {
+  font-family: var(--font-mono);
+}
+
+/* Flat panel utility (formerly glassmorphism) */
 .glass-panel {
   background: var(--bg-glass);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
   border: 1px solid var(--border-color);
-  border-radius: 12px;
-  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
-  transition: border-color var(--transition-normal), box-shadow var(--transition-normal);
+  border-radius: 2px;
+  transition: border-color var(--transition-fast);
 }
 
 .glass-panel:hover {
   border-color: var(--border-hover);
-  box-shadow: var(--shadow-glow);
 }
 
 /* Animations */
@@ -88,7 +91,6 @@ body {
   height: 8px;
   background-color: var(--accent-cyan);
   border-radius: 50%;
-  box-shadow: 0 0 8px var(--accent-cyan);
   animation: pulse 2s infinite ease-in-out;
 }
 

@@ -1,0 +1,16 @@
+[Unit]
+Description=Tmux AI Orchestrator Dashboard
+After=network.target
+
+[Service]
+ Type=simple
+User=noxturne
+Environment=HOME=/home/noxturne
+Environment=PATH=/home/noxturne/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/home/noxturne/.local/bin/tmux-ai-start
+ExecStop=/home/noxturne/.local/bin/tmux-ai-stop
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

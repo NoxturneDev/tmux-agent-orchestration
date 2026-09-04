@@ -397,7 +397,6 @@
     height: 8px;
     background: #00e5ff;
     border-radius: 50%;
-    box-shadow: 0 0 8px #00e5ff;
   }
 
   .offline-indicator {
@@ -453,7 +452,6 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    box-shadow: var(--shadow-glow);
   }
 
   .welcome-container h3 {
@@ -567,7 +565,6 @@
     white-space: pre-wrap;
     word-break: break-all;
     color: #cbd5e1;
-    box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.5);
   }
 
   .markdown-body {
@@ -721,7 +718,6 @@
     background: rgba(0, 229, 255, 0.15);
     border-color: var(--accent-cyan);
     color: var(--accent-cyan);
-    box-shadow: 0 0 8px rgba(0, 229, 255, 0.2);
   }
 
   .speak-msg-btn {
@@ -785,8 +781,6 @@
   .review-plan-btn:hover {
     background: rgba(0, 229, 255, 0.2);
     border-color: var(--accent-cyan);
-    transform: translateY(-1px);
-    box-shadow: 0 0 6px rgba(0, 229, 255, 0.15);
   }
 
   /* Floating Plan Banner */
@@ -829,8 +823,7 @@
   }
 
   .banner-action-btn:hover {
-    transform: translateY(-1px);
-    box-shadow: 0 0 8px var(--accent-cyan);
+    border-color: var(--accent-cyan);
   }
 
   .banner-dismiss-btn {
@@ -855,8 +848,7 @@
   .modal-backdrop {
     position: fixed;
     inset: 0;
-    background: rgba(3, 6, 15, 0.75);
-    backdrop-filter: blur(8px);
+    background: rgba(11, 13, 18, 0.9);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -873,8 +865,7 @@
     flex-direction: column;
     background: var(--bg-glass);
     border: 1px solid var(--border-color);
-    border-radius: 12px;
-    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+    border-radius: 2px;
     overflow: hidden;
   }
 
@@ -1004,7 +995,6 @@
   }
 
   .btn-primary:hover {
-    transform: translateY(-1px);
-    box-shadow: 0 0 12px rgba(0, 229, 255, 0.4);
+    border-color: var(--accent-cyan);
   }
 </style>

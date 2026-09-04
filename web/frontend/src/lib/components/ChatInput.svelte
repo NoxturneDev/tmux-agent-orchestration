@@ -616,10 +616,10 @@
     display: flex;
     gap: 12px;
     align-items: flex-end;
-    background: rgba(3, 6, 15, 0.6);
+    background: var(--bg-secondary);
     border: 1px solid var(--border-color);
     padding: 8px 12px;
-    border-radius: 8px;
+    border-radius: 2px;
     transition: all var(--transition-fast);
   }
 
@@ -628,19 +628,16 @@
   }
 
   .chat-input-container.listening {
-    border-color: rgba(255, 82, 82, 0.5);
-    box-shadow: 0 0 15px rgba(255, 82, 82, 0.15);
+    border-color: #ff5252;
     animation: border-pulse-red 2s infinite ease-in-out;
   }
 
   @keyframes border-pulse-red {
     0%, 100% {
-      border-color: rgba(255, 82, 82, 0.4);
-      box-shadow: 0 0 10px rgba(255, 82, 82, 0.05);
+      border-color: rgba(255, 82, 82, 0.5);
     }
     50% {
-      border-color: rgba(255, 82, 82, 0.8);
-      box-shadow: 0 0 20px rgba(255, 82, 82, 0.25);
+      border-color: rgba(255, 82, 82, 0.9);
     }
   }
 
@@ -678,12 +675,12 @@
   .listening-overlay {
     position: absolute;
     inset: 0;
-    background: rgba(3, 6, 15, 0.95);
+    background: var(--bg-secondary);
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 16px;
-    border-radius: 4px;
+    border-radius: 2px;
     z-index: 5;
   }
 
@@ -698,7 +695,6 @@
     height: 10px;
     background-color: #ff5252;
     border-radius: 50%;
-    box-shadow: 0 0 0 0 rgba(255, 82, 82, 0.7);
     animation: pulse-red 1.2s infinite;
   }
 
@@ -747,18 +743,8 @@
   }
 
   @keyframes pulse-red {
-    0% {
-      transform: scale(0.95);
-      box-shadow: 0 0 0 0 rgba(255, 82, 82, 0.7);
-    }
-    70% {
-      transform: scale(1);
-      box-shadow: 0 0 0 6px rgba(255, 82, 82, 0);
-    }
-    100% {
-      transform: scale(0.95);
-      box-shadow: 0 0 0 0 rgba(255, 82, 82, 0);
-    }
+    0%, 100% { opacity: 0.6; }
+    50% { opacity: 1; }
   }
 
   .cancel-recording-btn {
@@ -793,10 +779,8 @@
   }
 
   .send-btn:hover:not(:disabled) {
-    background: linear-gradient(135deg, var(--accent-cyan), var(--accent-blue));
-    border-color: transparent;
-    transform: translateY(-1px);
-    box-shadow: 0 0 10px rgba(0, 229, 255, 0.2);
+    background: var(--accent-cyan);
+    border-color: var(--accent-cyan);
   }
 
   .send-btn:hover:not(:disabled) .send-icon {
@@ -873,11 +857,9 @@
     width: 100%;
     max-height: 200px;
     overflow-y: auto;
-    background: rgba(13, 18, 34, 0.95);
-    backdrop-filter: blur(12px);
+    background: var(--bg-secondary);
     border: 1px solid var(--border-color);
-    border-radius: 6px;
-    box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.5);
+    border-radius: 2px;
     z-index: 20;
     margin-bottom: 8px;
     display: flex;

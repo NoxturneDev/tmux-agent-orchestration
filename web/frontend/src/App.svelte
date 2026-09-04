@@ -6,18 +6,33 @@
   import JarvisChat from './lib/components/JarvisChat.svelte';
   import ClaudeUsage from './lib/components/ClaudeUsage.svelte';
   import AntigravityQuota from './lib/components/AntigravityQuota.svelte';
+  import ReviewPage from './lib/components/ReviewPage.svelte';
 
   let activeTab = $state('chat'); // 'chat', 'radar', 'usage', or 'quota'
   let activeLeftTab = $state('radar'); // 'radar', 'usage', or 'quota'
 
+  let isReview = $state(false);
+  let reviewSlug = $state('');
+
   onMount(() => {
-    connectFleet();
+    const match = window.location.pathname.match(/^\/review-(.+)$/);
+    if (match) {
+      isReview = true;
+      reviewSlug = match[1];
+    } else {
+      connectFleet();
+    }
     return () => {
-      disconnectFleet();
+      if (!isReview) {
+        disconnectFleet();
+      }
     };
   });
 </script>
 
+{#if isReview}
+  <ReviewPage slug={reviewSlug} />
+{:else}
 <div class="app-container">
 
 
@@ -100,6 +115,7 @@
     </button>
   </div>
 </div>
+{/if}
 
 <style>
   .app-container {
@@ -108,7 +124,7 @@
     height: 100%;
     padding: 16px;
     gap: 16px;
-    background: radial-gradient(circle at 50% 0%, rgba(0, 229, 255, 0.05) 0%, rgba(7, 10, 19, 0) 70%);
+    background: var(--bg-primary);
   }
 
   /* App Header Styles Removed */
@@ -212,7 +228,6 @@
 
   .tab-btn.active {
     color: var(--accent-cyan);
-    text-shadow: 0 0 10px rgba(0, 229, 255, 0.3);
   }
 
   .tab-svg {
@@ -260,6 +275,5 @@
     right: 0;
     height: 2px;
     background: var(--accent-cyan);
-    box-shadow: 0 0 8px var(--accent-cyan);
   }
 </style>

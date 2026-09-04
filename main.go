@@ -15,6 +15,7 @@ import (
 )
 
 func cleanUpTempStreams() {
+	// Edited for RAG incremental sync testing
 	// 1. Find and remove all temp stream files from /tmp
 	files, err := filepath.Glob("/tmp/mux-agent-*-stream.log")
 	if err == nil {
